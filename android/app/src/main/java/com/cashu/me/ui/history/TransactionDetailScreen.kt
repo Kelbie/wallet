@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -71,6 +70,7 @@ import com.cashu.me.ui.components.AmountHero
 import com.cashu.me.ui.components.ExplorerLinkRow
 import com.cashu.me.ui.components.DescriptionDetailRow
 import com.cashu.me.ui.components.InspectorRow
+import com.cashu.me.ui.components.InspectorRowStyle
 import com.cashu.me.ui.components.InlineNotice
 import com.cashu.me.ui.components.LocalConfirmationToastController
 import com.cashu.me.ui.components.NoticeSeverity
@@ -165,7 +165,9 @@ fun TransactionReceiptSheet(
     val fields = remember(current, walletState.mints) {
         TransactionDisplay.detailFields(current).filterNot { it.label == "Memo" }.map { field ->
             if (field.label == "Mint") {
-                field.copy(value = walletState.mints.firstOrNull { it.url == current.mintUrl }?.name ?: field.value)
+                field.copy(value = current.mintUrl?.let {
+                    com.cashu.me.Core.mintDisplayName(it, walletState.mints)
+                } ?: field.value)
             } else field
         }
     }
@@ -224,11 +226,11 @@ fun TransactionReceiptSheet(
             Column(modifier = Modifier.fillMaxWidth()) {
                 fields.forEach { field ->
                     InspectorRow(
+                        style = InspectorRowStyle.History,
                         label = field.label,
-                        modifier = Modifier.heightIn(min = 48.dp),
                         value = field.value,
-                        valueMonospaced = field.value.length > 24 ||
-                            field.label in MonospacedLabels,
+                        valueMonospaced = field.label != "Mint" &&
+                            (field.value.length > 24 || field.label in MonospacedLabels),
                         onClick = field.copyValue?.let { full ->
                             {
                                 scope.launch {
@@ -244,16 +246,16 @@ fun TransactionReceiptSheet(
                         trailingIcon = field.copyValue?.let { Icons.Outlined.ContentCopy },
                     )
                     if (field.label == "Mint" && description != null) {
-                        DescriptionDetailRow(description)
+                        DescriptionDetailRow(description, style = InspectorRowStyle.History)
                     }
                 }
                 if (fields.none { it.label == "Mint" } && description != null) {
-                    DescriptionDetailRow(description)
+                    DescriptionDetailRow(description, style = InspectorRowStyle.History)
                 }
                 // Explorer link joins the detail rows (iOS parity) —
                 // it's reference material, not an action.
                 if (explorerUrl != null) {
-                    ExplorerLinkRow(onClick = { context.openInBrowser(explorerUrl) })
+                    ExplorerLinkRow(onClick = { context.openInBrowser(explorerUrl) }, style = InspectorRowStyle.History)
                 }
             }
 
@@ -348,6 +350,7 @@ fun TransactionReceiptSheet(
 
     ActivityDetailSheet(
         title = title,
+        fitsContent = !(showsQr && description != null),
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
         sheetGesturesEnabled = !dismiss.isDismissing,

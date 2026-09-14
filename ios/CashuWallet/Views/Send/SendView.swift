@@ -185,6 +185,7 @@ struct SendView: View {
         // A stray swipe must not tear down the flow while proofs are being
         // swapped into the locked/pending token.
         .interactiveDismissDisabled(isGenerating)
+        .walletSheetSurface(fillsScreen: true)
     }
 
     // MARK: - Send Input View
@@ -256,7 +257,7 @@ struct SendView: View {
             // The selector sits under the amount and over the keypad, not under
             // the toolbar: it qualifies the amount, so it reads as a setting on
             // the way to the action rather than a second header.
-            if let mint = displaySendMint {
+            if !isGenerating, let mint = displaySendMint {
                 mintSelector(mint: mint)
                     // Aligned to the number pad below, not the CTA: the pad is
                     // the block this row reads against.
@@ -313,11 +314,10 @@ struct SendView: View {
     // MARK: - Mint Selector
 
     private func mintSelector(mint: MintInfo) -> some View {
-        MintSelectorRow(
+        AmountEntryMintSelector(
             direction: .source,
             mint: mint,
             balanceText: sendBalanceText,
-            showsBalance: true,
             // Gated on a spendable balance: an empty mint offered a Max that
             // filled in zero.
             onUseMax: effectiveSendBalance > 0 ? { useMax(mint: mint) } : nil,
@@ -666,7 +666,7 @@ struct SendView: View {
                         )
                     }
 
-                    // Status — inline badge transition while pending/checking.
+                    // Show feedback only while a claim check is active.
                     // No `tokenClaimed` branch: the body swaps to the
                     // full-screen success terminal the instant the claim
                     // lands, so an inline Claimed badge here could never
@@ -680,15 +680,6 @@ struct SendView: View {
                             }
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .transition(.opacity)
-                        } else {
-                            HStack(spacing: 6) {
-                                Image(systemName: "clock")
-                                    .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
-                                Text("Pending")
-                            }
-                            .font(.subheadline)
-                            .foregroundStyle(.orange)
                             .transition(.opacity)
                         }
                     }
@@ -732,7 +723,7 @@ struct SendView: View {
                             detailRow(label: "Fiat", value: fiatValue)
                         }
                         if let mintURL = generatedTokenMintURL {
-                            detailRow(label: "Mint", value: extractMintHost(mintURL))
+                            detailRow(label: "Mint", value: MintInfo.displayName(for: mintURL, in: walletManager.mints))
                         }
                     }
                     .padding(.top, 8)
@@ -793,7 +784,7 @@ struct SendView: View {
             ? AmountFormatter.sats(generatedAmount, useBitcoinSymbol: settings.useBitcoinSymbol)
             : CurrencyAmount(value: generatedAmount, currency: generatedUnitCurrency).formatted()
         var rows: [PaymentStatusView.DetailRow] = [
-            .init(label: "Amount", value: amountText),
+            .init(label: "Amount", isAmount: true, value: amountText),
         ]
         if tokenFee > 0 {
             rows.append(.init(label: "Fee", value: generatedFeeText))
@@ -801,7 +792,7 @@ struct SendView: View {
         if let mintURL = generatedTokenMintURL {
             rows.append(.init(
                 label: "Mint",
-                value: extractMintHost(mintURL)
+                value: MintInfo.displayName(for: mintURL, in: walletManager.mints)
             ))
         }
         return rows
@@ -816,18 +807,12 @@ struct SendView: View {
     }
 
     private func detailRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer()
+        PaymentDetailPair(label: label) {
             Text(value)
-                .fontWeight(.medium)
-                .lineLimit(1)
+                .fontWeight(.regular)
                 .truncationMode(.middle)
         }
-        .font(.subheadline)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 14)
+        .paymentDetailRow()
     }
 
     private func formatBalance(_ sats: UInt64) -> String {
@@ -1342,6 +1327,11 @@ struct UnifiedSendView: View {
         statusPhase == nil && step == .input && connectMintRoute != .discover
     }
 
+    private var isLoadingMeltQuote: Bool {
+        guard step == .confirm, case .melt = locked else { return false }
+        return meltQuote == nil && errorMessage == nil
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -1351,7 +1341,7 @@ struct UnifiedSendView: View {
                 // content below it changes. (It used to be re-rendered inside
                 // confirm's header, which read as the row escaping upward and
                 // reappearing lower down.)
-                if let locked, step == .amount || step == .confirm, statusPhase == nil {
+                if let locked, step == .amount || step == .confirm, statusPhase == nil, !isLoadingMeltQuote {
                     toRow(locked)
                         .padding(.horizontal)
                         .padding(.top, 8)
@@ -1364,7 +1354,7 @@ struct UnifiedSendView: View {
                 }
 
                 Group {
-                    if let statusPhase {
+                    if let statusPhase = statusPhase ?? (isLoadingMeltQuote ? .processing : nil) {
                         // Single branch keeps the status screen's identity stable across
                         // processing → sent → failed, so PaymentStatusView owns the morph.
                         statusView(statusPhase)
@@ -1483,7 +1473,7 @@ struct UnifiedSendView: View {
         .presentationDragIndicator(routedPresentation ? .hidden : .visible)
         // A stray swipe must not tear down the flow while the melt is executing.
         .interactiveDismissDisabled(step == .sending)
-        .compactBottomSheetSurface()
+        .walletSheetSurface(fillsScreen: !prefersCompactSheet)
     }
 
     // MARK: Input step
@@ -1598,10 +1588,8 @@ struct UnifiedSendView: View {
 
     // MARK: Pinned "To" row
 
-    /// Recipient row in the flow-row vocabulary — the same quiet, unboxed shape
-    /// as `MintSelectorRow`, so "From" and "To" share one left edge and one
-    /// label style. No fill or capsule: the amount stays the screen's focal
-    /// point, and the row is still tappable to change the recipient.
+    /// The recipient stays pinned above the step swap and remains tappable
+    /// to change the destination.
     private func toRow(_ locked: SendAmountDestination) -> some View {
         Button(action: editRecipient) {
             HStack(alignment: .firstTextBaseline, spacing: FlowRowMetrics.gap) {
@@ -1626,19 +1614,13 @@ struct UnifiedSendView: View {
         .accessibilityHint("Double-tap to change the recipient")
     }
 
-    /// Confirm-step mint selector, floated in the scaffold's `topAccessory` so
-    /// its presence (confirm) or absence (status) never shifts the anchored
-    /// amount hero (see `PayFlowScaffold`). It sits under the pinned "To" row
-    /// the step machine keeps outside the swap — the recipient holds still,
-    /// only this row arrives. The mint is `nil` for Cashu-request states with
-    /// no held mint — those keep an actionable row in the details instead.
+    /// The source mint accompanies the amount, matching Receive amount entry.
     @ViewBuilder
-    private func confirmHeader(mint: MintInfo?) -> some View {
+    private func confirmMintSelector(mint: MintInfo?) -> some View {
         if let mint {
-            MintSelectorRow(
+            AmountEntryMintSelector(
                 direction: .source,
                 mint: mint,
-                balanceText: AmountFormatter.sats(mint.balance, useBitcoinSymbol: settings.useBitcoinSymbol),
                 onChooseMint: canChangeMint ? {
                     HapticFeedback.selection()
                     showingMintPicker = true
@@ -1842,11 +1824,10 @@ struct UnifiedSendView: View {
     }
 
     private func amountMintRow(_ mint: MintInfo) -> some View {
-        MintSelectorRow(
+        AmountEntryMintSelector(
             direction: .source,
             mint: mint,
             balanceText: AmountFormatter.sats(mint.balance, useBitcoinSymbol: settings.useBitcoinSymbol),
-            showsBalance: true,
             // Gated on a spendable balance, matching Send Ecash — this row
             // offered a Max on an empty mint that filled in zero.
             onUseMax: mint.balance > 0 ? useMax : nil,
@@ -1925,26 +1906,31 @@ struct UnifiedSendView: View {
             || (meltQuote == nil && errorMessage != nil && errorShowsMintAction)
         return VStack(spacing: 0) {
             PayFlowScaffold {
-                if let quote = shortQuote {
-                    confirmCautionFace(
-                        message: "Not enough balance.",
-                        detail: mintInfo(for: quote).map { mint in
-                            "This mint holds \(AmountFormatter.sats(mint.balance, useBitcoinSymbol: settings.useBitcoinSymbol)); the payment reserves up to \(AmountFormatter.sats(quote.totalAmount, useBitcoinSymbol: settings.useBitcoinSymbol))."
-                        }
-                    )
-                    .transition(.opacity)
-                } else if let quote = meltQuote {
-                    CurrencyAmountDisplay(sats: quote.amount, primary: $settings.amountDisplayPrimary)
+                VStack(spacing: 8) {
+                    if let quote = shortQuote {
+                        confirmCautionFace(
+                            message: "Not enough balance.",
+                            detail: mintInfo(for: quote).map { mint in
+                                "This mint holds \(AmountFormatter.sats(mint.balance, useBitcoinSymbol: settings.useBitcoinSymbol)); the payment reserves up to \(AmountFormatter.sats(quote.totalAmount, useBitcoinSymbol: settings.useBitcoinSymbol))."
+                            }
+                        )
                         .transition(.opacity)
-                } else if let errorMessage {
-                    confirmCautionFace(
-                        message: errorMessage,
-                        detail: errorShowsMintAction ? meltInsufficientDetail : nil
-                    )
-                    .transition(.opacity)
-                } else {
-                    SpinnerRing()
+                    } else if let quote = meltQuote {
+                        CurrencyAmountDisplay(sats: quote.amount, primary: $settings.amountDisplayPrimary)
+                            .transition(.opacity)
+                    } else if let errorMessage {
+                        confirmCautionFace(
+                            message: errorMessage,
+                            detail: errorShowsMintAction ? meltInsufficientDetail : nil
+                        )
                         .transition(.opacity)
+                    } else {
+                        SpinnerRing()
+                            .transition(.opacity)
+                    }
+                    if !quotePending {
+                        confirmMintSelector(mint: meltQuote.flatMap(mintInfo(for:)) ?? activeMeltMint)
+                    }
                 }
             } details: {
                 if let quote = meltQuote, shortQuote == nil {
@@ -1961,8 +1947,6 @@ struct UnifiedSendView: View {
                 }
             } footer: {
                 EmptyView()
-            } topAccessory: {
-                confirmHeader(mint: meltQuote.flatMap(mintInfo(for:)) ?? activeMeltMint)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -2079,15 +2063,11 @@ struct UnifiedSendView: View {
     /// can be switched. Tapping a switchable row opens the mint picker.
     @ViewBuilder
     private func mintDetailRow(label: String, mint: MintInfo, switchable: Bool) -> some View {
-        let content = HStack(spacing: 8) {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer()
+        let content = PaymentDetailPair(label: label) {
             MintAvatarView(iconUrl: mint.iconUrl, name: mint.name, size: 22)
             Text(mint.name)
-                .fontWeight(.medium)
+                .fontWeight(.regular)
                 .foregroundStyle(.primary)
-                .lineLimit(1)
                 .truncationMode(.middle)
             if switchable {
                 Image(systemName: "chevron.down")
@@ -2095,9 +2075,7 @@ struct UnifiedSendView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .font(.subheadline)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 14)
+        .paymentDetailRow(isInteractive: switchable)
 
         if switchable {
             Button(action: {
@@ -2154,6 +2132,7 @@ struct UnifiedSendView: View {
                 }
                 rows.append(.init(
                     label: "Amount",
+                    isAmount: true,
                     value: AmountFormatter.sats(quote.amount, useBitcoinSymbol: settings.useBitcoinSymbol)
                 ))
                 if let explanation = activeRouteExplanation {
@@ -2184,6 +2163,7 @@ struct UnifiedSendView: View {
             // in place instead of inserting mid-list and shoving the rows below down.
             rows.append(.init(
                 label: "Amount",
+                isAmount: true,
                 value: paymentAmountForCreq.map {
                     AmountFormatter.sats($0, useBitcoinSymbol: settings.useBitcoinSymbol)
                 } ?? "",
@@ -2438,10 +2418,13 @@ struct UnifiedSendView: View {
         // Shared Pay-flow scaffold so the request facts sit at the same Y as the
         // processing / success screens.
         PayFlowScaffold {
-            CurrencyAmountDisplay(
-                sats: paymentAmountForCreq ?? 0,
-                primary: $settings.amountDisplayPrimary
-            )
+            VStack(spacing: 8) {
+                CurrencyAmountDisplay(
+                    sats: paymentAmountForCreq ?? 0,
+                    primary: $settings.amountDisplayPrimary
+                )
+                confirmMintSelector(mint: creqTopMint(creq))
+            }
         } details: {
             creqRequestDetails(creq)
 
@@ -2463,7 +2446,7 @@ struct UnifiedSendView: View {
             Button(action: payCreq) {
                 Text(creqPayButtonTitle)
             }
-            .glassButton()
+            .flatSheetSecondaryButton()
             .disabled(!creqCanPay)
             .padding(.horizontal)
             .padding(.bottom, 16)
@@ -2476,8 +2459,6 @@ struct UnifiedSendView: View {
                 }
                 .environmentObject(walletManager)
             }
-        } topAccessory: {
-            confirmHeader(mint: creqTopMint(creq))
         }
     }
 
@@ -2800,14 +2781,12 @@ struct UnifiedSendView: View {
                     Spacer()
                     Text(hosts.isEmpty ? "Add a mint to pay"
                             : (hosts.count == 1 ? hosts[0] : "You hold none of these"))
-                        .fontWeight(.medium)
+                        .fontWeight(.regular)
                         .foregroundStyle(.orange)
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .truncationMode(.middle)
                 }
-                .font(.subheadline)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 14)
+                .paymentDetailRow()
                 .accessibilityElement(children: .combine)
             }
         }
@@ -2817,37 +2796,26 @@ struct UnifiedSendView: View {
     /// recoverable — names the target mint with a quiet "what to do" subtitle,
     /// no alarming color (the CTA does the work).
     private func creqActionableMintRow(host: String, subtitle: String) -> some View {
-        HStack(spacing: 8) {
-            Text("Mint")
-                .foregroundStyle(.secondary)
-            Spacer()
+        PaymentDetailPair(label: "Mint") {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(host)
-                    .fontWeight(.medium)
+                    .fontWeight(.regular)
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
                     .truncationMode(.middle)
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
-        .font(.subheadline)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 14)
+        .paymentDetailRow()
         .accessibilityElement(children: .combine)
     }
 
     private var creqFeesRow: some View {
-        HStack {
-            Text("Fees")
-                .foregroundStyle(.secondary)
-            Spacer()
+        PaymentDetailPair(label: "Fees") {
             creqFeeValueText
         }
-        .font(.subheadline)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 14)
+        .paymentDetailRow()
         .accessibilityElement(children: .combine)
     }
 
@@ -2856,16 +2824,16 @@ struct UnifiedSendView: View {
         if needsAcquire {
             // Funding the mint routes over Lightning, which always carries a fee;
             // the exact reserve is confirmed during the transfer and in History.
-            Text("Network fee").fontWeight(.medium).foregroundStyle(.secondary)
+            Text("Network fee").fontWeight(.regular).foregroundStyle(.secondary)
         } else {
             switch feeState {
             case .loading:
                 ProgressView().controlSize(.mini)
             case .free:
-                Text("No fee").fontWeight(.medium)
+                Text("No fee").fontWeight(.regular)
             case .amount(let fee):
                 Text(AmountFormatter.sats(fee, useBitcoinSymbol: settings.useBitcoinSymbol))
-                    .fontWeight(.medium)
+                    .fontWeight(.regular)
             case .idle, .unavailable:
                 Text("—").foregroundStyle(.secondary)
             }
@@ -2873,19 +2841,12 @@ struct UnifiedSendView: View {
     }
 
     private func creqDetailRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer()
+        PaymentDetailPair(label: label) {
             Text(value)
-                .fontWeight(.medium)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(2)
+                .fontWeight(.regular)
                 .truncationMode(.tail)
         }
-        .font(.subheadline)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 14)
+        .paymentDetailRow()
         .accessibilityElement(children: .combine)
     }
 
@@ -3095,9 +3056,11 @@ struct MeltView: View {
                 if let paymentPhase {
                     statusView(paymentPhase)
                         .transition(.opacity)
-                } else if meltQuote != nil || isPreparingInitialQuote {
-                    // One branch for both loading (quote == nil) and confirmed — the fee
-                    // rows fill in place when the mint quote lands, no view swap.
+                } else if isGettingQuote || isPreparingInitialQuote {
+                    PaymentStatusView(details: [], phase: .processing, onDone: {}, onRetry: {})
+                        .transition(.opacity)
+                } else if meltQuote != nil {
+                    // The resolved quote presents the amount and editable choices.
                     quoteConfirmView(quote: meltQuote)
                         .transition(reduceMotion ? .opacity : .asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -3323,11 +3286,10 @@ struct MeltView: View {
 
     private var requestInputView: some View {
         VStack(spacing: 0) {
-            if let mint = displayMeltMint {
-                MintSelectorRow(
+            if !isGettingQuote && !isPaying, let mint = displayMeltMint {
+                AmountEntryMintSelector(
                     direction: .source,
                     mint: mint,
-                    balanceText: AmountFormatter.sats(mint.balance, useBitcoinSymbol: settings.useBitcoinSymbol),
                     onChooseMint: canChangeMint ? {
                         HapticFeedback.selection()
                         showingMintPicker = true
@@ -3520,10 +3482,23 @@ struct MeltView: View {
         // Shared Pay-flow scaffold (see `PayFlowScaffold`) so the details block sits
         // at the same Y here as on the processing / success screens.
         return PayFlowScaffold {
-            CurrencyAmountDisplay(
-                sats: displayAmount,
-                primary: $settings.amountDisplayPrimary
-            )
+            VStack(spacing: 8) {
+                CurrencyAmountDisplay(
+                    sats: displayAmount,
+                    primary: $settings.amountDisplayPrimary
+                )
+                if !isLoading && !isPaying, let mint = selectorMint {
+                    AmountEntryMintSelector(
+                        direction: .source,
+                        mint: mint,
+                        onChooseMint: canChangeMint ? {
+                            HapticFeedback.selection()
+                            showingMintPicker = true
+                        } : nil
+                    )
+                        .padding(.horizontal)
+                }
+            }
         } details: {
             VStack(spacing: 0) {
                 meltDetailRow(label: "Method", value: methodName)
@@ -3581,37 +3556,16 @@ struct MeltView: View {
             .disabled(isLoading || isPaying || !canPay)
             .padding(.horizontal)
             .padding(.bottom, 16)
-        } topAccessory: {
-            if let mint = selectorMint {
-                MintSelectorRow(
-                    direction: .source,
-                    mint: mint,
-                    balanceText: AmountFormatter.sats(mint.balance, useBitcoinSymbol: settings.useBitcoinSymbol),
-                    onChooseMint: canChangeMint ? {
-                        HapticFeedback.selection()
-                        showingMintPicker = true
-                    } : nil
-                )
-                    .padding(.horizontal)
-                    .padding(.top, 12)
-            }
         }
     }
 
     private func meltDetailRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer()
+        PaymentDetailPair(label: label) {
             Text(value)
-                .fontWeight(.medium)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(1)
+                .fontWeight(.regular)
                 .truncationMode(.middle)
         }
-        .font(.subheadline)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 14)
+        .paymentDetailRow()
         .accessibilityElement(children: .combine)
     }
 
@@ -3637,7 +3591,7 @@ struct MeltView: View {
                     value: PaymentRequestParser.normalizeBitcoinRequest(requestInput)
                 ))
             }
-            rows.append(.init(label: "Amount", value: "\(quote.amount) sat"))
+            rows.append(.init(label: "Amount", isAmount: true, value: "\(quote.amount) sat"))
             rows.append(.init(label: "Max fee", value: "\(quote.feeReserve) sat"))
             if let mint = mintInfo(for: quote) {
                 rows.append(.init(label: "Mint", value: mint.name))

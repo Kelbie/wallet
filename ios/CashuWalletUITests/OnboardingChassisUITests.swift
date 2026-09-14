@@ -325,4 +325,55 @@ final class OnboardingChassisUITests: UITestBase {
             "Tapping the top tick should jump back to word 1, got \(String(describing: rail.value))"
         )
     }
+
+    func testVerifiedSeedRemainsScrubbable() {
+        app.terminate()
+        app.launchEnvironment["UITEST_DISABLE_ANIMATIONS"] = "0"
+        app.launch()
+        tapWhenReady(app.buttons["Restore Wallet"], timeout: 30)
+        tapWhenReady(app.buttons["Use Seed Phrase"], timeout: 10)
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        // This journey exercises verified-word scrubbing. Explicitly focus
+        // after the animated entrance; autofocus has separate coverage above.
+        focusTextField(field)
+        // Rapid keyboard input must not replay a committed word before the
+        // next SwiftUI render pass, even while word transitions animate.
+        field.typeText(Array(repeating: "abandon", count: 11).joined(separator: " ") + " about ")
+        XCTAssertTrue(app.staticTexts["All 12 words verified."].waitForExistence(timeout: 5))
+        let rail = app.otherElements["Seed word progress"]
+        let top = rail.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04))
+        let bottom = rail.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.96))
+        bottom.press(forDuration: 0.6, thenDragTo: top)
+        let atStart = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == 'Word 1 of 12'"), object: rail
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [atStart], timeout: 5), .completed)
+        XCTAssertEqual(field.value as? String, "abandon")
+        top.press(forDuration: 0.6, thenDragTo: bottom)
+        let atEnd = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == 'Word 12 of 12'"), object: rail
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [atEnd], timeout: 5), .completed)
+        XCTAssertEqual(field.value as? String, "about")
+        XCTAssertTrue(app.staticTexts["All 12 words verified."].exists)
+    }
+
+    func testAddingCustomMintStaysOnMintSelection() {
+        createWalletThroughSeed()
+        tapWhenReady(app.buttons["onboarding-add-custom-mint"])
+        let field = app.textFields["onboarding-custom-mint-field"]
+        focusTextField(field)
+        field.typeText(mintURL)
+        let action = app.buttons["onboarding-continue"]
+        XCTAssertEqual(action.label, "Add mint")
+        tapWhenReady(action)
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        XCTAssertEqual(action.label, "Continue")
+        XCTAssertTrue(app.buttons["onboarding-skip-mint"].exists)
+        XCTAssertFalse(app.buttons["Wallet"].exists)
+        tapWhenReady(action)
+        waitForMainTab(timeout: 60)
+    }
+
 }

@@ -106,12 +106,13 @@ import com.cashu.me.ui.components.InspectorRow
 import com.cashu.me.ui.components.MethodActionRow
 import com.cashu.me.ui.components.MintPickerSheet
 import com.cashu.me.ui.components.MintSelectorDirection
-import com.cashu.me.ui.components.MintSelectorRow
+import com.cashu.me.ui.components.AmountEntryMintSelector
 import com.cashu.me.ui.components.NoticeSeverity
 import com.cashu.me.ui.components.NumberPadFooter
 import com.cashu.me.ui.components.PaymentStatusPhase
 import com.cashu.me.ui.components.PaymentStatusScreen
 import com.cashu.me.ui.components.PrimaryButton
+import com.cashu.me.ui.components.SecondaryButton
 import com.cashu.me.ui.components.QrCard
 import com.cashu.me.ui.components.SheetHeader
 import com.cashu.me.ui.components.SkeletonValue
@@ -191,6 +192,7 @@ fun UnifiedSendScreen(
     prefilledPayload: String? = null,
     onPrefilledConsumed: () -> Unit = {},
     onDismissLockChanged: (Boolean) -> Unit = {},
+    onCompactSheetChanged: (Boolean) -> Unit = {},
 ) {
     val walletState by walletManager.state.collectAsState()
     val settings by settingsManager.state.collectAsState()
@@ -605,9 +607,16 @@ fun UnifiedSendScreen(
     // Amount → Input). Swallow back only while the melt is in flight.
     BackHandler(enabled = status is SendStatus.Sending) {}
 
+    // Quote preparation uses the same full-screen status layout as submission.
+    // Keep operation state separate so cancelling a quote remains safe.
+    val quotePending = step == SendStep.Confirm && locked is LockedRail.Melt &&
+        meltQuote == null && quoteError == null
+    val visibleStatus = status ?: if (quotePending) SendStatus.Sending(SendPaymentDetails(emptyList())) else null
+
     // Compact while the input face is up so Scan/Ecash/Tap sit near the thumb;
     // amount/confirm/status need the full sheet for the keypad and pay scaffold.
     val prefersCompactSheet = status == null && step == SendStep.Input
+    LaunchedEffect(prefersCompactSheet) { onCompactSheetChanged(prefersCompactSheet) }
     Column(
         modifier = (
             if (prefersCompactSheet) {
@@ -624,7 +633,7 @@ fun UnifiedSendScreen(
         // spinner morphs into the check/X in place; the form ↔ terminal swap
         // itself fades through instead of hard-cutting.
         AnimatedContent(
-            targetState = status,
+            targetState = visibleStatus,
             modifier = if (status == null && step == SendStep.Input) {
                 Modifier.fillMaxWidth()
             } else {
@@ -884,15 +893,21 @@ private fun SendStatusTerminal(
     // A terminal outcome (already paid) can't be retried — offer Done;
     // anything else returns to the confirm step.
     val failure = (status as? SendStatus.Failed)?.message
+    val successAmount = if (status is SendStatus.Sent && !settlementPending) {
+        status.details.rows.firstOrNull { it.key == SendPaymentDetailKey.Amount }
+            ?.takeIf { it.value is SendPaymentDetailValue.Sats || it.value is SendPaymentDetailValue.Text }
+            ?.let { formatPaymentDetail(it, formatter, useBitcoinSymbol) }
+    } else null
     PaymentStatusScreen(
         modifier = modifier,
+        successAmount = successAmount,
         phase = when (status) {
             is SendStatus.Sending -> PaymentStatusPhase.Processing
             is SendStatus.Sent -> PaymentStatusPhase.Success
             is SendStatus.Failed -> PaymentStatusPhase.Failure
         },
         title = when (status) {
-            is SendStatus.Sending -> "Sending payment…"
+            is SendStatus.Sending -> "Processing…"
             is SendStatus.Sent -> if (settlementPending) "Payment processing" else "Payment sent"
             is SendStatus.Failed -> status.message.title ?: "Payment failed"
         },
@@ -912,7 +927,7 @@ private fun SendStatusTerminal(
                 { if (status.message.isTerminal) onClose() else onRetry() }
             }
         },
-        rows = { SendPaymentDetailRows(status.details, formatter, useBitcoinSymbol) },
+        rows = { SendPaymentDetailRows(status.details, formatter, useBitcoinSymbol, showAmount = successAmount == null) },
     )
 }
 
@@ -921,22 +936,11 @@ internal fun SendPaymentDetailRows(
     details: SendPaymentDetails,
     formatter: AmountFormatter,
     useBitcoinSymbol: Boolean,
+    showAmount: Boolean = true,
 ) {
-    details.rows.forEachIndexed { index, row ->
+    details.rows.filter { showAmount || it.key != SendPaymentDetailKey.Amount }.forEach { row ->
         val loading = row.value == SendPaymentDetailValue.Pending
-        val value = when (val detailValue = row.value) {
-            SendPaymentDetailValue.Pending -> ""
-            SendPaymentDetailValue.Unavailable -> "Unavailable"
-            is SendPaymentDetailValue.Text -> detailValue.text
-            is SendPaymentDetailValue.Sats -> {
-                val formatted = formatter.formatWalletSats(detailValue.amount, useBitcoinSymbol)
-                when {
-                    row.key in FeeDetailKeys && detailValue.amount == 0L -> "No fee"
-                    detailValue.isUpperBound -> "Up to $formatted"
-                    else -> formatted
-                }
-            }
-        }
+        val value = formatPaymentDetail(row, formatter, useBitcoinSymbol)
         InspectorRow(
             label = row.label,
             value = value,
@@ -948,6 +952,24 @@ internal fun SendPaymentDetailRows(
             valueMonospaced = row.valueMonospaced,
             loading = loading,
         )
+    }
+}
+
+private fun formatPaymentDetail(
+    row: SendPaymentDetailRow,
+    formatter: AmountFormatter,
+    useBitcoinSymbol: Boolean,
+): String = when (val detailValue = row.value) {
+    SendPaymentDetailValue.Pending -> ""
+    SendPaymentDetailValue.Unavailable -> "Unavailable"
+    is SendPaymentDetailValue.Text -> detailValue.text
+    is SendPaymentDetailValue.Sats -> {
+        val formatted = formatter.formatWalletSats(detailValue.amount, useBitcoinSymbol)
+        when {
+            row.key in FeeDetailKeys && detailValue.amount == 0L -> "No fee"
+            detailValue.isUpperBound -> "Up to $formatted"
+            else -> formatted
+        }
     }
 }
 
@@ -1076,11 +1098,8 @@ private fun InputFace(
 }
 
 /**
- * Recipient row in the flow-row vocabulary — the same quiet, unboxed shape as
- * [MintSelectorRow], so "From" and "To" share one left edge and one label
- * style instead of a lone capsule breaking the alignment (iOS `toRow` parity).
- * Rendered once above the step swap, so the recipient never travels or
- * double-renders between the amount and confirm faces.
+ * Recipient row, rendered once above the step swap so the recipient stays
+ * pinned between the amount and confirm faces (iOS `toRow` parity).
  */
 @Composable
 private fun ToRow(destination: String, modifier: Modifier = Modifier) {
@@ -1111,39 +1130,15 @@ private fun EstimatedCashuRequestFeeRow(
     presentation: CashuRequestFeePresentation,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 32.dp)
-            .semantics(mergeDescendants = true) {
-                stateDescription = if (presentation.loading) {
-                    "Calculating"
-                } else {
-                    presentation.value
-                }
-            },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "Estimated fee",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.weight(1f))
-        SkeletonValue(loading = presentation.loading) {
-            Text(
-                text = presentation.value,
-                style = if (presentation.valueMonospaced) {
-                    MaterialTheme.typography.bodyMedium.withMonoDigits()
-                } else {
-                    MaterialTheme.typography.bodyMedium
-                },
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-            )
-        }
-    }
+    InspectorRow(
+        label = "Estimated fee",
+        value = presentation.value,
+        valueMonospaced = presentation.valueMonospaced,
+        loading = presentation.loading,
+        modifier = modifier.semantics(mergeDescendants = true) {
+            stateDescription = if (presentation.loading) "Calculating" else presentation.value
+        },
+    )
 }
 
 @Composable
@@ -1230,12 +1225,10 @@ private fun AmountFace(
         }
         // Under the amount, over the keypad (Send Ecash / Receive parity).
         if (mint != null) {
-            MintSelectorRow(
+            AmountEntryMintSelector(
                 direction = MintSelectorDirection.Source,
                 mint = mint,
                 balanceText = balanceText,
-                showBalance = true,
-                modifier = Modifier.padding(horizontal = CashuTheme.spacing.snug),
                 onPickMint = onPickMint,
                 // Gated on a spendable balance, the way Send Ecash already does
                 // it — an empty mint offered a Max that filled in zero.
@@ -1362,6 +1355,14 @@ private fun ConfirmFace(
                     currencyCode = currencyCode,
                     useBitcoinSymbol = useBitcoinSymbol,
                     formatter = formatter,
+                )
+            }
+            if (!quoteLoading && mint != null) {
+                Spacer(Modifier.height(CashuTheme.spacing.snug))
+                AmountEntryMintSelector(
+                    direction = MintSelectorDirection.Source,
+                    mint = mint,
+                    onPickMint = onPickMint.takeIf { canPickMint },
                 )
             }
         }
@@ -1521,6 +1522,15 @@ private fun ConfirmFace(
                 text = "Retry Quote",
                 onClick = onRetryQuote,
             )
+            !isMelt -> SecondaryButton(
+                text = cashuRequestPayButtonText(
+                    route = cashuRoute,
+                    fallback = "Pay ${cashuAmountLabel ?: formatter.formatWalletSats(amountSats, useBitcoinSymbol)}",
+                ),
+                onClick = onPay,
+                modifier = Modifier.testTag(UiTestTags.SendPaymentSubmit),
+                enabled = canPayCashuRequest && quoteError == null,
+            )
             else -> PrimaryButton(
                 text = cashuRequestPayButtonText(
                     route = cashuRoute,
@@ -1528,28 +1538,12 @@ private fun ConfirmFace(
                 ),
                 onClick = onPay,
                 modifier = Modifier.testTag(UiTestTags.SendPaymentSubmit),
-                enabled = if (isMelt) {
-                    quote != null && !insufficient && quoteError == null
-                } else {
-                    canPayCashuRequest && quoteError == null
-                },
+                enabled = quote != null && !insufficient && quoteError == null,
             )
         }
         Spacer(Modifier.navigationBarsPadding())
         }
-        // Floating From selector (iOS topAccessory): overlaid so its presence
-        // never shifts the anchored hero band below it.
-        if (mint != null) {
-            MintSelectorRow(
-                direction = MintSelectorDirection.Source,
-                mint = mint,
-                balanceText = formatter.formatWalletSats(mintBalance, useBitcoinSymbol),
-                onPickMint = onPickMint.takeIf { canPickMint },
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(horizontal = CashuTheme.spacing.comfortable),
-            )
-        }
+
     }
 }
 
@@ -1703,17 +1697,19 @@ private fun TopUpQuoteSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
-            Text(
-                text = when (phase) {
-                    CashuRequestTopUpPhase.AwaitingPayment -> "Waiting for payment…"
-                    CashuRequestTopUpPhase.PayingRequest -> "Payment received — paying request…"
-                    CashuRequestTopUpPhase.Failed -> "Cashu Request payment is not complete."
-                    CashuRequestTopUpPhase.Done -> "Payment sent"
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
+            if (phase != CashuRequestTopUpPhase.AwaitingPayment) {
+                Text(
+                    text = when (phase) {
+                        CashuRequestTopUpPhase.AwaitingPayment -> ""
+                        CashuRequestTopUpPhase.PayingRequest -> "Payment received — paying request…"
+                        CashuRequestTopUpPhase.Failed -> "Cashu Request payment is not complete."
+                        CashuRequestTopUpPhase.Done -> "Payment sent"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
             errorMessage?.let {
                 InlineNotice(text = it, severity = errorSeverity)
             }

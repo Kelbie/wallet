@@ -80,7 +80,9 @@ class ActivityDetailJourneyTest {
             dateEpochMillis = System.currentTimeMillis(), status = TransactionStatus.Completed,
             mintUrl = FakeWalletGateway.TestMintUrl, quoteId = "activity-offer"))
         runBlocking { fixture.container.walletManager.loadTransactions() }
-        robot.tapText("History").tapText("Reusable Invoice").awaitText("1 payment received")
+        robot.tapText("History").tapText("Reusable Invoice").awaitText("Total received")
+        compose.onNodeWithText("₿2,100").assertIsDisplayed()
+        compose.onNodeWithText("1 payment received").assertDoesNotExist()
         compose.onNodeWithText("Created").performScrollTo().assertIsDisplayed()
         compose.onNodeWithContentDescription("Share").assertIsDisplayed()
         compose.onNodeWithText("New Request").assertDoesNotExist()
@@ -166,7 +168,8 @@ class ActivityDetailJourneyTest {
                 mints = listOf("https://mint.example"), memo = "Coffee tips", encoded = "creqAfixture")
             store.attachPayment(request.id, "payment-$unit-1", 1200)
             store.attachPayment(request.id, "payment-$unit-2", 34)
-            robot.tapText("Cashu Request").awaitText("2 payments received")
+            robot.tapText("Cashu Request").awaitText("New Request")
+            compose.onNodeWithText("2 payments received").assertDoesNotExist()
             compose.onNodeWithText("Total received").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText(if (unit == "sat") "₿1,234" else "$12.34").assertIsDisplayed()
             compose.onNodeWithText("mint.example").assertIsDisplayed()
@@ -192,9 +195,10 @@ class ActivityDetailJourneyTest {
             mints = listOf("https://usd.example"), memo = "Coffee", encoded = "creqAoriginal")
         store.attachPayment(original.id, "first", 1200)
         store.attachPayment(original.id, "second", 34)
-        robot.tapText("History").tapText("Cashu Request").awaitText("2 payments received")
+        robot.tapText("History").tapText("Cashu Request").awaitText("New Request")
         compose.onNodeWithText("Mint").performScrollTo().performClick()
-        robot.tapText("Nutshell UI Test Mint").awaitText("Waiting for payment…")
+        robot.tapText("Nutshell UI Test Mint").awaitText("SAT")
+        compose.onNodeWithText("Waiting for payment…").assertDoesNotExist()
         compose.onNodeWithText("Total received").assertDoesNotExist()
         compose.onNodeWithText("SAT").assertIsDisplayed()
         compose.onNode(hasText("Amount").and(hasText("Any"))).assertExists()
@@ -207,7 +211,8 @@ class ActivityDetailJourneyTest {
         screenshot("request-after-currency-change")
         // A payment to the previous code must not trigger success on this sheet.
         compose.runOnIdle { store.attachPayment(original.id, "late", 10) }
-        robot.awaitText("Waiting for payment…")
+        compose.onNodeWithText("Payment Received!").assertDoesNotExist()
+        compose.onNodeWithText("Waiting for payment…").assertDoesNotExist()
         compose.runOnIdle { store.attachPayment(next.id, "new", 21) }
         robot.awaitText("Payment Received!")
     }

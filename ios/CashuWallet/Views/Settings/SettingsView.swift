@@ -1220,56 +1220,48 @@ struct RestoreWalletView: View {
 // MARK: - QR Code Detail Sheet
 
 struct QRCodeDetailSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
     let title: String
     let content: String
-
     @State private var contentHeight: CGFloat = 0
 
     var body: some View {
-        // Content-fit receipt, not a .medium detent: the medium sheet cut the
-        // value line off below the fold, so the one thing the QR encodes was
-        // invisible until the user dragged. The sheet now hugs title + QR +
-        // value + actions exactly, matching Android's content-height sheet.
-        VStack(spacing: 0) {
-            // In-content title — like every receipt sheet, dismissal is the
-            // drag indicator / swipe, not a floating close-X.
-            Text(title)
-                .font(.title2.weight(.semibold))
+        ScrollView {
+            VStack(spacing: 0) {
+                Text(title)
+                    .font(.title2.weight(.semibold))
+                    .multilineTextAlignment(.center)
 
-            QRCodeView(content: content, showControls: false)
-                .padding()
-                .frame(width: 280, height: 280)
-                .background(Color.white)
-                .clipShape(.rect(cornerRadius: 16))
+                QRCodeView(content: content, showControls: false)
+                    .padding()
+                    .frame(width: 280, height: 280)
+                    .background(Color.white)
+                    .clipShape(.rect(cornerRadius: 16))
+                    .padding(.top, 24)
+
+                Text(content)
+                    .cashuText(.monoDisplay)
+                    .truncationMode(.middle)
+                    .padding(.top, 16)
+
+                HStack(spacing: 12) {
+                    Button(action: copyToClipboard) {
+                        Text("Copy")
+                    }
+                    .flatSheetSecondaryButton()
+
+                    ShareLink(item: content) {
+                        Text("Share")
+                    }
+                    .glassButton()
+                }
                 .padding(.top, 24)
-
-            // One middle-truncated line at full body size and primary ink —
-            // this is the sheet's second focal point, not a footnote. The full
-            // value travels via Copy/Share.
-            Text(content)
-                .cashuText(.monoDisplay)
-                .truncationMode(.middle)
-                .padding(.top, 16)
-
-            HStack(spacing: 12) {
-                Button(action: copyToClipboard) {
-                    Text("Copy")
-                }
-                .flatSheetSecondaryButton()
-
-                ShareLink(item: content) {
-                    Text("Share")
-                }
-                .glassButton()
             }
-            .padding(.top, 24)
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
+            .contentFitMeasured { contentHeight = $0 }
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 20)
-        .padding(.bottom, 16)
-        .contentFitMeasured { contentHeight = $0 }
+        .scrollBounceBehavior(.basedOnSize)
         .contentFitDetent(contentHeight, estimate: 480, navigationBar: false)
         .compactBottomSheetSurface()
         .presentationDragIndicator(.visible)
@@ -1399,7 +1391,6 @@ struct BackupView: View {
     @State private var showWords = false
     @State private var contentHeight: CGFloat = 0
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
     var body: some View {
         let words = walletManager.getMnemonicWords()
@@ -1416,29 +1407,7 @@ struct BackupView: View {
 
             if showWords {
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 10) {
-                        ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                            HStack(spacing: 6) {
-                                Text("\(index + 1).")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Text(word)
-                                    .font(.caption2.weight(.medium))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .multilineTextAlignment(.leading)
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.horizontal, 12)
-                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                            .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color(uiColor: .separator), lineWidth: 0.5)
-                            )
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Word \(index + 1), \(word)")
-                        }
-                    }
+                    RecoveryWordGrid(words: words, boxed: true)
                 }
                 .frame(maxHeight: 260)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -1451,7 +1420,7 @@ struct BackupView: View {
                     revealWords()
                 }
             }
-            .glassButton()
+            .flatSheetSecondaryButton()
             .contentTransition(.opacity)
         }
         .padding(.horizontal, 24)
@@ -1483,6 +1452,7 @@ struct BackupView: View {
             guard await AppLockManager.shared.authenticate(reason: "Copy your seed phrase") else { return }
             let words = walletManager.getMnemonicWords().joined(separator: " ")
             UIPasteboard.general.string = words
+            HapticFeedback.notification(.success)
             ConfirmationToast.show("Copied recovery phrase")
         }
     }

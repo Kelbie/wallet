@@ -129,9 +129,14 @@ final class ActivityDetailUITests: XCTestCase {
         row.tap()
         let total = app.descendants(matching: .any).matching(identifier: "Total received").firstMatch
         XCTAssertEqual(total.value as? String, "₿1,234")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "payments received")).firstMatch.exists)
+        let beforeEditing = XCTAttachment(screenshot: app.screenshot())
+        beforeEditing.name = "cashu-request-received-clean-details"
+        beforeEditing.lifetime = .keepAlways
+        add(beforeEditing)
         app.buttons["Unit"].tap()
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "USD")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Waiting for payment…"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "cashu.history.payment-code").firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons["Unit"].value as? String, "USD")
         XCTAssertFalse(total.exists)
         let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -140,7 +145,7 @@ final class ActivityDetailUITests: XCTestCase {
         add(attachment)
         app.buttons["Mint"].tap()
         app.staticTexts["Sat mint"].tap()
-        XCTAssertTrue(app.staticTexts["Waiting for payment…"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "cashu.history.payment-code").firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(total.exists)
         let unit = app.descendants(matching: .any).matching(identifier: "Unit").firstMatch
         XCTAssertEqual(unit.value as? String, "SAT")

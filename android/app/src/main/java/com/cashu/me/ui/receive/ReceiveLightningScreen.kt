@@ -38,6 +38,8 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.QrCode
+import com.cashu.me.Core.NPCService
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -75,6 +77,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
@@ -117,7 +120,7 @@ import com.cashu.me.ui.components.InspectorRow
 import com.cashu.me.ui.components.LocalConfirmationToastController
 import com.cashu.me.ui.components.MintPickerSheet
 import com.cashu.me.ui.components.MintSelectorDirection
-import com.cashu.me.ui.components.MintSelectorRow
+import com.cashu.me.ui.components.AmountEntryMintSelector
 import com.cashu.me.ui.components.NoticeSeverity
 import com.cashu.me.ui.components.NumberPadFooter
 import com.cashu.me.ui.components.PaymentStatusPhase
@@ -129,7 +132,6 @@ import com.cashu.me.ui.components.QrCard
 import com.cashu.me.ui.components.SheetHeader
 import com.cashu.me.ui.components.TwoFaceScreen
 import com.cashu.me.ui.components.UnitPickerSheet
-import com.cashu.me.ui.components.WaitingForPaymentRow
 import com.cashu.me.ui.components.neutralActionButtonColors
 import com.cashu.me.ui.components.openInBrowser
 import com.cashu.me.ui.components.shareText
@@ -184,12 +186,15 @@ private const val MAX_OFFER_DESCRIPTION_LENGTH = 640
 @Composable
 fun ReceiveLightningScreen(
     walletManager: WalletManager,
+    npcService: NPCService,
     cashuRequestStore: CashuRequestStore,
     settingsManager: SettingsManager,
     priceService: PriceService,
     onClose: () -> Unit,
 ) {
     val walletState by walletManager.state.collectAsState()
+    val npcState by npcService.state.collectAsState()
+    var lightningAddressOpen by remember { mutableStateOf(false) }
     val settings by settingsManager.state.collectAsState()
     val priceState by priceService.state.collectAsState()
     val cashuRequestState by cashuRequestStore.state.collectAsState()
@@ -725,6 +730,9 @@ fun ReceiveLightningScreen(
                         CreatingOverlay(method = method)
                     } else {
                         InputFace(
+                            onShowLightningAddress = { lightningAddressOpen = true }.takeIf {
+                                npcState.isEnabled && npcState.isInitialized && npcState.lightningAddress.isNotBlank()
+                            },
                             amount = amount,
                             onAmountChange = { amount = it; errorText = null },
                             selectedMethod = method,
@@ -1028,10 +1036,8 @@ fun ReceiveLightningScreen(
                         },
                         fiatCurrencyCode = settings.bitcoinPriceCurrency,
                         useBitcoinSymbol = settings.useBitcoinSymbol,
-                        pendingStatusText = when {
-                            !isOnchain -> "Waiting for payment…"
-                            observation != null -> "${observation.statusText}. Trying to mint…"
-                            else -> "Waiting for on-chain payment…"
+                        onchainStatusText = observation?.takeIf { isOnchain }?.let {
+                            "${it.statusText}. Trying to mint…"
                         },
                         explorerLabel = if (observation == null) {
                             "View address in block explorer"
@@ -1081,6 +1087,9 @@ fun ReceiveLightningScreen(
     }
     }
 
+    if (lightningAddressOpen) {
+        LightningAddressReceiveModal(npcService, settingsManager, onDismiss = { lightningAddressOpen = false })
+    }
     if (mintPickerOpen) {
         MintPickerSheet(
             mints = walletState.mints,
@@ -1220,6 +1229,7 @@ internal fun InputFace(
     amountValid: Boolean,
     errorText: String?,
     onCreate: () -> Unit,
+    onShowLightningAddress: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -1229,6 +1239,16 @@ internal fun InputFace(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(CashuTheme.spacing.default))
+        if (onShowLightningAddress != null) {
+            androidx.compose.material3.TextButton(
+                onClick = onShowLightningAddress,
+                modifier = Modifier.testTag("receive-lightning-address"),
+            ) {
+                Icon(Icons.Outlined.QrCode, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("Lightning Address", style = MaterialTheme.typography.bodyLarge)
+            }
+        }
         Spacer(Modifier.weight(1f))
         if (selectedMethod == PaymentMethodKind.Onchain) {
             Text(
@@ -1276,13 +1296,10 @@ internal fun InputFace(
         }
         Spacer(Modifier.weight(1f))
         // Under the amount, over the keypad — the same slot the send flows use.
-        if (mint != null) {
-            MintSelectorRow(
+        if (!creating && mint != null) {
+            AmountEntryMintSelector(
                 direction = MintSelectorDirection.Destination,
                 mint = mint,
-                balanceText = mintBalanceText,
-                showBalance = true,
-                modifier = Modifier.padding(horizontal = CashuTheme.spacing.snug),
                 onPickMint = onPickMint,
             )
             Spacer(Modifier.height(CashuTheme.spacing.snug))
@@ -1328,7 +1345,7 @@ private fun DisplayFace(
     fiatPrice: Double?,
     fiatCurrencyCode: String,
     useBitcoinSymbol: Boolean,
-    pendingStatusText: String,
+    onchainStatusText: String?,
     explorerLabel: String,
     onCopy: () -> Unit,
     onRetryPendingMint: () -> Unit,
@@ -1382,15 +1399,20 @@ private fun DisplayFace(
                     useBitcoinSymbol = useBitcoinSymbol,
                 )
             }
-            if (settlementState != null) {
+            if (settlementState != null && settlementState != MintQuoteSettlementState.Waiting) {
                 MintQuoteSettlementStatus(
                     state = settlementState,
                     onRetry = onRetryPendingMint,
                 )
             } else if (isExpired) {
                 InlineNotice(text = "Expired", severity = NoticeSeverity.Error, centered = true)
-            } else {
-                WaitingForPaymentRow(text = pendingStatusText)
+            } else if (onchainStatusText != null) {
+                Text(
+                    text = onchainStatusText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
             }
             errorText?.let { InlineNotice(text = it, severity = NoticeSeverity.Error) }
             if (!isReusable && settlementState == null && !isExpired) {
@@ -1528,7 +1550,7 @@ private fun MintQuoteSettlementStatus(
         label = "mint-quote-settlement-status",
     ) { current ->
         when (current) {
-            MintQuoteSettlementState.Waiting -> WaitingForPaymentRow()
+            MintQuoteSettlementState.Waiting -> Unit
             MintQuoteSettlementState.PaymentDetected -> Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(CashuTheme.spacing.snug),
@@ -1919,15 +1941,9 @@ private fun ReceiveSuccessTerminal(
         title = "Payment Received!",
         onDone = onDone,
         modifier = modifier,
+        successAmount = info.amountLabel,
         rows = {
-            if (info.amountLabel != null) {
-                InspectorRow(
-                    label = "Amount",
-                    value = info.amountLabel,
-                    valueMonospaced = true,
-                )
-            }
-            if (info.mintName != null) {
+            if (info.method != PaymentMethodKind.Bolt11 && info.mintName != null) {
                 InspectorRow(
                     label = "Mint",
                     value = info.mintName,

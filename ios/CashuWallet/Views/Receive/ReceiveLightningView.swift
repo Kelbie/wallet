@@ -27,6 +27,7 @@ struct ReceiveLightningView: View {
     @EnvironmentObject var walletManager: WalletManager
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var priceService = PriceService.shared
+    @ObservedObject private var npcService = NPCService.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var amountString = ""
@@ -34,6 +35,7 @@ struct ReceiveLightningView: View {
     /// BOLT12 only: when true the offer is amountless (sender chooses).
     @State private var isAmountless = false
     @State private var showMethodPicker = false
+    @State private var showLightningAddress = false
     @State private var mintQuote: MintQuoteInfo?
     @State private var isCreatingRequest = false
     @State private var isMinting = false
@@ -170,7 +172,7 @@ struct ReceiveLightningView: View {
                             .accessibilityLabel("Share request")
                         }
                     }
-                } else if requestFailure == nil && shouldShowMethodPicker && !isCreatingRequest {
+                } else if requestFailure == nil && shouldShowMethodPicker && !isCreatingRequest && !isPaid {
                     // Liquid Glass method switcher. On iOS 26 the toolbar renders
                     // bar buttons as glass, so this reads as a sibling of the
                     // close button by construction. Replaces the old inline
@@ -212,6 +214,10 @@ struct ReceiveLightningView: View {
             .sheet(isPresented: $showMintPicker) {
                 MintSelectorSheet(selectedMint: $walletManager.activeMint)
                     .environmentObject(walletManager)
+            }
+            .fullScreenCover(isPresented: $showLightningAddress) {
+                LightningAddressReceiveView(address: npcService.lightningAddress)
+                    .canvasSheetBackground()
             }
             .sheet(isPresented: $showMethodPicker) {
                 MethodPickerSheet(
@@ -296,7 +302,7 @@ struct ReceiveLightningView: View {
             }
         }
         .accessibilityIdentifier("receive-lightning-screen")
-        .compactBottomSheetSurface()
+        .walletSheetSurface(fillsScreen: true)
     }
 
     // MARK: - Computed Properties
@@ -444,6 +450,20 @@ struct ReceiveLightningView: View {
 
     private var amountInputView: some View {
         VStack(spacing: 0) {
+            if npcService.isEnabled && npcService.isInitialized && !npcService.lightningAddress.isEmpty {
+                Button {
+                    HapticFeedback.selection()
+                    showLightningAddress = true
+                } label: {
+                    Label("Lightning Address", systemImage: "qrcode")
+                        .font(.body.weight(.medium))
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 8)
+                .accessibilityHint("Show your address to receive any amount")
+                .accessibilityIdentifier("receive-lightning-address")
+            }
             Spacer()
 
             amountHero
@@ -451,7 +471,7 @@ struct ReceiveLightningView: View {
             Spacer()
 
             // Under the amount, over the keypad — the same slot the send flows use.
-            if let mint = walletManager.activeMint {
+            if !isCreatingRequest, let mint = walletManager.activeMint {
                 mintSelector(mint: mint)
                     // Aligned to the number pad below, not the CTA.
                     .padding(.horizontal, NumberPadMetrics.gutter)
@@ -550,11 +570,9 @@ struct ReceiveLightningView: View {
     // MARK: - Mint Selector
 
     private func mintSelector(mint: MintInfo) -> some View {
-        MintSelectorRow(
+        AmountEntryMintSelector(
             direction: .destination,
             mint: mint,
-            balanceText: formatBalance(mint.balance),
-            showsBalance: true,
             // One mint means nothing to choose between, so the row drops its
             // chevron and stops opening a picker that would list a single row.
             onChooseMint: walletManager.mints.count > 1 ? { showMintPicker = true } : nil
@@ -718,10 +736,11 @@ struct ReceiveLightningView: View {
         if let amount = receivedAmount ?? quote.amount {
             rows.append(.init(
                 label: "Amount",
+                isAmount: true,
                 value: formatQuoteAmount(amount, unit: quote.unit)
             ))
         }
-        if let mint = mintDisplayValue(for: quote) {
+        if quote.paymentMethod != .bolt11, let mint = mintDisplayValue(for: quote) {
             rows.append(.init(
                 label: "Mint",
                 value: mint
@@ -776,42 +795,28 @@ struct ReceiveLightningView: View {
     // MARK: - Detail Row
 
     private func detailRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer()
+        PaymentDetailPair(label: label) {
             Text(value)
-                .fontWeight(.medium)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(1)
+                .fontWeight(.regular)
                 .truncationMode(.middle)
         }
-        .font(.subheadline)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 12)
+        .paymentDetailRow()
     }
 
     /// Same as `detailRow` but tappable, with a trailing pencil — used for the
     /// Amount row on the reusable offer screen (mirrors the Cashu Request screen).
     private func editableRow(label: String, value: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack {
-                Text(label)
-                    .foregroundStyle(.secondary)
-                Spacer()
+            PaymentDetailPair(label: label) {
                 Text(value)
-                    .fontWeight(.medium)
-                    .multilineTextAlignment(.trailing)
-                    .lineLimit(1)
+                    .fontWeight(.regular)
                     .truncationMode(.middle)
                 Image(systemName: "pencil")
                     .font(.footnote)
                     .foregroundStyle(.tertiary)
                     .padding(.leading, 4)
             }
-            .font(.subheadline)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 12)
+            .paymentDetailRow(isInteractive: true)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -823,17 +828,12 @@ struct ReceiveLightningView: View {
     /// on-chain block explorer row.
     private func explorerLinkRow(label: String, url: URL) -> some View {
         Link(destination: url) {
-            HStack {
-                Text(label)
-                    .foregroundStyle(.secondary)
-                Spacer()
+            PaymentDetailPair(label: label) {
                 Image(systemName: "arrow.up.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
-            .font(.subheadline)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 12)
+            .paymentDetailRow(isInteractive: true)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -936,16 +936,12 @@ struct ReceiveLightningView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
                 .transition(reduceMotion ? .opacity : .asymmetric(insertion: .scale(scale: 0.9).combined(with: .opacity), removal: .opacity))
-            } else {
-                HStack(spacing: 6) {
-                    Image(systemName: "clock")
-                        .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
-                        .foregroundStyle(.orange)
-                        .accessibilityHidden(true)
-                    Text(pendingStatusText)
-                }
-                .font(.subheadline)
-                .transition(.opacity)
+            } else if mintQuote?.paymentMethod == .onchain,
+                      let observation = onchainObservation {
+                Text("\(observation.statusText). Trying to mint...")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .transition(.opacity)
             }
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.5, dampingFraction: 0.7), value: isPaid)
@@ -953,22 +949,6 @@ struct ReceiveLightningView: View {
         .animation(.easeInOut(duration: 0.2), value: isMinting)
         .animation(.easeInOut(duration: 0.2), value: isExpired)
         .animation(.easeInOut(duration: 0.2), value: mintRetryStatus.state)
-    }
-
-    private var pendingStatusText: String {
-        guard let quote = mintQuote else {
-            return "Waiting for payment..."
-        }
-
-        switch quote.paymentMethod {
-        case .bolt11, .bolt12:
-            return "Waiting for payment..."
-        case .onchain:
-            if let observation = onchainObservation {
-                return "\(observation.statusText). Trying to mint..."
-            }
-            return "Waiting for on-chain payment..."
-        }
     }
 
     // MARK: - Helpers

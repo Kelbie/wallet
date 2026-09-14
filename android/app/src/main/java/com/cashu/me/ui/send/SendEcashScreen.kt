@@ -47,7 +47,6 @@ import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -66,7 +65,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -106,7 +104,7 @@ import com.cashu.me.ui.components.GhostButton
 import com.cashu.me.ui.components.InlineNotice
 import com.cashu.me.ui.components.LocalConfirmationToastController
 import com.cashu.me.ui.components.MintPickerSheet
-import com.cashu.me.ui.components.MintSelectorRow
+import com.cashu.me.ui.components.AmountEntryMintSelector
 import com.cashu.me.ui.components.MintSelectorDirection
 import com.cashu.me.ui.components.NoticeSeverity
 import com.cashu.me.ui.components.PaymentStatusPhase
@@ -120,7 +118,6 @@ import com.cashu.me.ui.components.ToolbarIcon
 import com.cashu.me.ui.components.TwoFaceScreen
 import com.cashu.me.ui.components.UnitPickerSheet
 import com.cashu.me.ui.components.neutralActionButtonColors
-import com.cashu.me.ui.components.rememberPendingPulseAlpha
 import com.cashu.me.ui.components.shareText
 import com.cashu.me.ui.settings.P2PKKeyDisplay
 import com.cashu.me.ui.testing.UiTestTags
@@ -329,9 +326,9 @@ fun SendEcashScreen(
     LaunchedEffect(sending) { onDismissLockChanged(sending) }
 
     // Dismissal contract: system back = swipe = abandon to the wallet, so the
-    // sheet handles it. The header owns internal step-back (Generated → Input,
-    // Failure → Input) and shows a close on Input itself, which has nowhere to
-    // step back to. Swallow back only while a token is being generated.
+    // sheet handles it. A generated token completes the flow and closes to the
+    // wallet too. Only failure returns to input for another attempt.
+    // Swallow back while a token is being generated.
     BackHandler(enabled = sending) {}
 
     Column(
@@ -345,19 +342,16 @@ fun SendEcashScreen(
                 is SendFace.Generated -> "Pending Ecash"
                 is SendFace.Failure -> "Send Ecash"
             },
-            // Input has no parent step — leaving it lands on the wallet — so it
-            // gets a close. The result faces really do step back, and keep the
-            // arrow. The glyph matches what the control does.
-            navigationIcon = if (face == SendFace.Input) {
-                Icons.Outlined.Close
-            } else {
+            navigationIcon = if (face is SendFace.Failure) {
                 Icons.AutoMirrored.Outlined.ArrowBack
+            } else {
+                Icons.Outlined.Close
             },
-            navigationContentDescription = if (face == SendFace.Input) "Close" else "Back",
+            navigationContentDescription = if (face is SendFace.Failure) "Back" else "Close",
             onNavigationClick = {
                 when (face) {
                     SendFace.Input -> onClose()
-                    is SendFace.Generated -> face = SendFace.Input
+                    is SendFace.Generated -> onClose()
                     is SendFace.Failure -> face = SendFace.Input
                 }
             },
@@ -500,6 +494,7 @@ fun SendEcashScreen(
                     walletManager = walletManager,
                     result = current.result,
                     mintUrl = current.mintUrl,
+                    mintName = com.cashu.me.Core.mintDisplayName(current.mintUrl, walletState.mints),
                     unit = current.unit,
                     pollingEnabled = settings.checkSentTokens,
                     amountPresentation = paymentConfirmationAmountPresentation(
@@ -715,13 +710,11 @@ private fun InputFace(
         // The selector sits under the amount and over the keypad, not under the
         // toolbar: it qualifies the amount, so it reads as a setting on the way
         // to the action rather than a second header competing with the title.
-        if (activeMint != null) {
-            MintSelectorRow(
+        if (!sending && activeMint != null) {
+            AmountEntryMintSelector(
                 direction = MintSelectorDirection.Source,
                 mint = activeMint,
                 balanceText = balanceText,
-                showBalance = true,
-                modifier = Modifier.padding(horizontal = CashuTheme.spacing.snug),
                 onPickMint = onPickMint,
                 onUseMax = if (canUseMax) onUseMax else null,
             )
@@ -1042,6 +1035,7 @@ private fun GeneratedFace(
     walletManager: com.cashu.me.Core.WalletManager,
     result: SendTokenResult,
     mintUrl: String,
+    mintName: String,
     unit: String,
     pollingEnabled: Boolean,
     amountPresentation: PaymentConfirmationAmountPresentation,
@@ -1101,12 +1095,9 @@ private fun GeneratedFace(
             com.cashu.me.ui.components.PaymentStatusScreen(
                 phase = com.cashu.me.ui.components.PaymentStatusPhase.Success,
                 title = "Claimed",
+                successAmount = amountPresentation.primary,
                 onDone = onDone,
                 rows = {
-                    com.cashu.me.ui.components.InspectorRow(
-                        label = "Amount",
-                        value = amountPresentation.primary,
-                    )
                     receipt.fee?.let { feeLabel ->
                         com.cashu.me.ui.components.InspectorRow(
                             label = "Fee",
@@ -1116,7 +1107,7 @@ private fun GeneratedFace(
                     }
                     com.cashu.me.ui.components.InspectorRow(
                         label = "Mint",
-                        value = receipt.mint,
+                        value = mintName,
                     )
                 },
             )
@@ -1143,7 +1134,9 @@ private fun GeneratedFace(
                 confirmationMessage = "Copied ecash token",
             )
             GeneratedEcashAmount(presentation = amountPresentation)
-            ClaimStatusRow(claimState = claimState)
+            if (claimState == ClaimState.Checking) {
+                ClaimStatusRow(claimState = claimState)
+            }
             if (!pollingEnabled) {
                 when (val outcome = manualCheckResult) {
                     PendingTokenClaimCheckResult.NotClaimed -> InlineNotice(
@@ -1187,7 +1180,7 @@ private fun GeneratedFace(
                 }
                 com.cashu.me.ui.components.InspectorRow(
                     label = "Mint",
-                    value = com.cashu.me.Core.shortenMintUrl(mintUrl),
+                    value = mintName,
                 )
             }
         }
@@ -1292,26 +1285,7 @@ private fun ClaimStatusRow(
         label = "claim-state",
     ) { state ->
         when (state) {
-            ClaimState.Pending -> {
-                val pulseAlpha = rememberPendingPulseAlpha()
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(CashuTheme.spacing.tight),
-                    modifier = Modifier.alpha(pulseAlpha),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Schedule,
-                        contentDescription = null,
-                        tint = com.cashu.me.ui.theme.CashuTheme.colors.onPendingContainer,
-                        modifier = Modifier.size(STATUS_ICON_SMALL),
-                    )
-                    Text(
-                        text = "Pending",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-            }
+            ClaimState.Pending -> Unit
             ClaimState.Checking -> {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
