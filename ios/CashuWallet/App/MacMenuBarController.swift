@@ -46,17 +46,42 @@ final class MacMenuBarController: NSObject {
 
     func install() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(
-            systemSymbolName: "bitcoinsign.circle",
-            accessibilityDescription: "Cashu Wallet"
-        )
-        item.button?.image?.isTemplate = true
+        item.button?.image = Self.statusItemImage()
         item.button?.target = self
         item.button?.action = #selector(statusItemClicked)
         // Ask for both edges so a right-click can open the quit menu without
         // stealing the plain left-click that toggles the wallet.
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         statusItem = item
+    }
+
+    /// The cashew mark, as a template image.
+    ///
+    /// Template means monochrome plus alpha: AppKit discards the colours and
+    /// tints the opaque pixels to match the menu bar, which is what makes an
+    /// icon track light/dark, the "reduce transparency" setting and the
+    /// highlight state when the panel is open. So the seven-colour mark is not
+    /// usable here directly — the asset is the cashew's own outline with the
+    /// sunglasses knocked out as a hole, which survives the tint and still
+    /// reads as the logo at 18pt.
+    ///
+    /// Falls back to the old SF Symbol if the asset is ever missing, because a
+    /// status item with no image is an invisible, unclickable dead zone in the
+    /// menu bar rather than an obvious failure.
+    private static func statusItemImage() -> NSImage? {
+        let image = NSImage(named: "MenuBarCashu") ?? NSImage(
+            systemSymbolName: "bitcoinsign.circle",
+            accessibilityDescription: nil
+        )
+        // Menu bar icons are sized in points against the bar, not by their
+        // intrinsic size; the mark is taller than it is wide, so height leads.
+        if let image, image.size.height > 0 {
+            let height: CGFloat = 18
+            image.size = NSSize(width: (image.size.width / image.size.height) * height, height: height)
+        }
+        image?.isTemplate = true
+        image?.accessibilityDescription = "Cashu Wallet"
+        return image
     }
 
     // MARK: Click handling
