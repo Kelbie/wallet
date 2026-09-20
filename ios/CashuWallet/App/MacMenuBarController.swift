@@ -1,11 +1,11 @@
 #if os(macOS)
 import AppKit
+import Combine
 import SwiftUI
 
 extension Notification.Name {
     static let cashuMenuBarPanelDidOpen = Notification.Name("cashu.menuBar.panelDidOpen")
     static let cashuMenuBarPanelDidClose = Notification.Name("cashu.menuBar.panelDidClose")
-    static let cashuMenuBarDidReceiveURL = Notification.Name("cashu.menuBar.didReceiveURL")
 }
 
 // MARK: - Panel
@@ -14,16 +14,14 @@ extension Notification.Name {
 //
 // MenuBarExtra is five lines and would have been the obvious choice, but its
 // window-style content is hosted in a popover, and a popover is not a window
-// that can present a sheet. This app presents 51 sheets across 17 files — the
-// entire send, receive, mint and settings surface. Hosting the root in a real
+// that can present a sheet. This app presents around fifty sheets — the entire
+// send, receive, mint and settings surface. Hosting the root in a real
 // panel keeps every one of them working, which makes the "manual" route the
 // smaller change by a wide margin.
 
-/// A borderless panel that can still take key focus.
-///
-/// Both overrides are load-bearing. A borderless window refuses key status by
-/// default, and without it every text field in the wallet — amounts, mint URLs,
-/// the twelve-word restore — would silently swallow keystrokes.
+/// A chromeless panel that can still take key focus. Without key status every
+/// text field in the wallet — amounts, mint URLs, the twelve-word restore —
+/// would silently swallow keystrokes.
 private final class MenuBarPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -129,18 +127,16 @@ final class MacMenuBarController: NSObject {
 
     // MARK: Show / hide
 
-    private func showPanel() {
+    /// Idempotent, so a deep link can call it without toggling the wallet shut.
+    func showPanel() {
+        guard !isPanelVisible else { return }
         let panel = panel ?? makePanel()
         self.panel = panel
 
         positionUnderStatusItem(panel)
         // An accessory app is not frontmost by default, so the panel would open
         // behind whatever the user was in and never take focus.
-        if #available(macOS 14, *) {
-            NSApp.activate()
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
         startWatchingForOutsideClicks()
         NotificationCenter.default.post(name: .cashuMenuBarPanelDidOpen, object: nil)
@@ -183,8 +179,12 @@ final class MacMenuBarController: NSObject {
         // as a sliver. Pinning the root fixes the negotiation at the size the
         // layout was designed for.
         let host = NSHostingView(
-            rootView: AppRootView()
-                .frame(width: Self.panelSize.width, height: Self.panelSize.height)
+            rootView: AppRootView(
+                walletManager: WalletManager(),
+                navigationManager: NavigationManager(),
+                appLockManager: .shared
+            )
+            .frame(width: Self.panelSize.width, height: Self.panelSize.height)
         )
         host.frame = NSRect(origin: .zero, size: Self.panelSize)
         panel.contentView = host
@@ -245,32 +245,20 @@ final class MacMenuBarController: NSObject {
 final class MacMenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private let controller = MacMenuBarController()
 
+    /// `cashu:` links. The wallet's NavigationManager lives inside the SwiftUI
+    /// tree, which may not be mounted yet — a link can arrive before the panel
+    /// has ever been opened. A current-value subject holds the link until
+    /// AppRootView subscribes, where a notification would be dropped.
+    static let incomingURL = CurrentValueSubject<URL?, Never>(nil)
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Belt and braces with LSUIElement in Info.plist: if the app is ever
-        // launched in a context where the plist key is not honoured, this still
-        // keeps it out of the Dock and the app switcher.
-        NSApp.setActivationPolicy(.accessory)
         controller.install()
     }
 
-    /// `cashu:` links. Routed through a notification because the wallet's
-    /// NavigationManager lives inside the SwiftUI tree, not out here.
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.first else { return }
-        controller.togglePanelIfNeeded()
-        NotificationCenter.default.post(
-            name: .cashuMenuBarDidReceiveURL,
-            object: url
-        )
-    }
-}
-
-private extension MacMenuBarController {
-    /// Opens the panel for an incoming link without closing it if it is already
-    /// up — a deep link should never toggle the wallet shut.
-    func togglePanelIfNeeded() {
-        guard !isPanelVisible else { return }
-        togglePanel()
+        Self.incomingURL.send(url)
+        controller.showPanel()
     }
 }
 #endif

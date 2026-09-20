@@ -15,9 +15,8 @@
 	  that group is derived from the team identifier in the code signature. An
 	  ad-hoc signature has no team identifier, so a sandboxed ad-hoc build cannot
 	  reach *either* keychain — the wallet fails to create a seed with "Failed to
-	  save to Keychain". This machine has no Mac Development certificate, so
-	  ad-hoc is the only option and switching the sandbox off is what makes a
-	  runnable local build possible at all.
+	  save to Keychain". Switching the sandbox off is what makes a local build
+	  runnable without a Mac Development certificate.
 
 	  The consequences are real and worth stating: this build is not sandboxed,
 	  so it is not a faithful test of file-access or network-permission

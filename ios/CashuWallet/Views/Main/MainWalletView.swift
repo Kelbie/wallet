@@ -226,9 +226,8 @@ struct MainWalletView: View {
                             }
                         }
                         #if os(iOS)
-                        // Swipeable pager for multi-unit balances. macOS has no
-                        // page style; the dots below still drive the selection,
-                        // so the pager degrades to a plain tab switch.
+                        // macOS has no page style, so the pager degrades to a
+                        // plain tab switch with visible tab chrome.
                         .tabViewStyle(.page(indexDisplayMode: .never))
                         #endif
                     }

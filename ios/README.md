@@ -57,8 +57,8 @@ xcodebuild -project CashuWallet.xcodeproj \
 ## macOS menu bar app
 
 The same target also builds a Mac app that lives in the menu bar. It is an
-`LSUIElement` accessory: no Dock icon, no window at launch — click the bitcoin
-glyph in the menu bar to open the wallet in a panel under it.
+`LSUIElement` accessory: no Dock icon, no window at launch — click the Cashu
+mark in the menu bar to open the wallet in a panel under it.
 
 ```sh
 ./Scripts/build-macos.sh run

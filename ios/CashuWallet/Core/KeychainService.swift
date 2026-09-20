@@ -283,8 +283,8 @@ class KeychainService: SecureStorageProtocol {
     /// Falling back keeps `Scripts/build-macos.sh` usable with no Apple Developer
     /// account, at the cost of using the legacy keychain on those builds only.
     ///
-    /// On iOS there is only one keychain, the flag is inert, and the fallback
-    /// never fires.
+    /// On iOS there is only one keychain, so the flag is inert and the fallback
+    /// is compiled out.
     private static func runWithPreferredKeychain(
         _ query: [String: Any],
         _ perform: ([String: Any]) -> OSStatus
@@ -309,34 +309,21 @@ class KeychainService: SecureStorageProtocol {
         return fallback
     }
 
-    /// Which statuses mean "try the legacy keychain instead".
+    /// Which statuses mean "try the legacy keychain instead". macOS only.
     ///
-    /// `errSecMissingEntitlement` and `errSecNotAvailable` are the refusals:
-    /// the OS is saying this process may not use the data-protection keychain
-    /// at all.
+    /// `errSecMissingEntitlement` and `errSecNotAvailable` are refusals: this
+    /// process may not use the data-protection keychain at all.
     ///
-    /// `errSecItemNotFound` is the subtle one, and only on macOS. `SecItemAdd`,
-    /// `SecItemUpdate` and `SecItemDelete` need a keychain access group and are
-    /// refused outright, so writes fall through to the legacy keychain and the
-    /// item physically lives there. `SecItemCopyMatching` needs no such group —
-    /// it happily searches the (empty) data-protection keychain and returns
-    /// `errSecItemNotFound`. Treating that as a real answer splits reads and
-    /// writes across two different stores: the seed saves, and then reads back
-    /// as absent. The wallet then believes it has no seed, shows onboarding
-    /// over a funded wallet, and records an empty "previous mnemonic" in the
-    /// replacement journal — and the journal's own read-after-write in
-    /// `commit()` fails with `fileReadCorruptFile`, stranding a database backup
-    /// that wedges every later attempt.
-    ///
-    /// On iOS there is a single keychain, `kSecUseDataProtectionKeychain` is
-    /// inert, and a genuine miss must stay a miss — retrying would only repeat
-    /// the same query against the same store.
+    /// `errSecItemNotFound` must fall back too. An unentitled build's writes are
+    /// refused and land in the legacy keychain, but `SecItemCopyMatching` needs
+    /// no access group: it searches the empty data-protection keychain and
+    /// reports a miss. Trusting that miss splits reads from writes — the seed
+    /// saves, reads back as absent, and onboarding appears over a funded wallet.
     private static func shouldFallBackToLegacyKeychain(_ status: OSStatus) -> Bool {
-        if status == errSecMissingEntitlement || status == errSecNotAvailable { return true }
         #if os(macOS)
-        return status == errSecItemNotFound
+        status == errSecMissingEntitlement || status == errSecNotAvailable || status == errSecItemNotFound
         #else
-        return false
+        false
         #endif
     }
 

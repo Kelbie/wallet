@@ -6,7 +6,7 @@
 #   ./Scripts/build-macos.sh run      # build, then launch it
 #
 # The app is an LSUIElement accessory: it has no Dock icon and no window at
-# launch. Look for the bitcoin glyph in the menu bar on the right-hand side.
+# launch. Look for the Cashu mark in the menu bar on the right-hand side.
 #
 # Signed ad-hoc by default so a build works with no Apple Developer setup at
 # all. Pass DEV_TEAM=... to sign with a real identity instead.
@@ -72,5 +72,5 @@ if [ "${1:-}" = "run" ]; then
     # Kill any previous instance so the status item is not installed twice.
     pkill -x CashuWallet 2>/dev/null || true
     open "${APP}"
-    echo "Launched. The wallet is the bitcoin glyph in your menu bar."
+    echo "Launched. The wallet is the Cashu mark in your menu bar."
 fi

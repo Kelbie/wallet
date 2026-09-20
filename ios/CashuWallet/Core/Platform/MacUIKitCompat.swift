@@ -146,17 +146,6 @@ enum UINotificationFeedbackGenerator {
     enum FeedbackType { case success, warning, error }
 }
 
-// MARK: - Animation gate
-
-/// The integration-test hook that disables animations app-wide. SwiftUI's own
-/// `transaction.disablesAnimations` still carries the load on macOS; this only
-/// exists so the call site in the app entry point compiles.
-enum UIView {
-    static func setAnimationsEnabled(_ enabled: Bool) {
-        NSAnimationContext.current.duration = enabled ? 0.25 : 0
-    }
-}
-
 // MARK: - Screen
 
 enum UIScreen {

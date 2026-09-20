@@ -835,10 +835,13 @@ enum ContentFitSheetMetrics {
     private static var bottomSafeAreaInset: CGFloat { 0 }
 
     /// The ceiling is the menu bar panel, not the display: a sheet presented in
-    /// a 700pt panel cannot use the height of a 1200pt screen. Falling back to
-    /// the screen keeps the value sane if the panel is not up yet.
+    /// a 700pt panel cannot use the height of a 1200pt screen. A sheet is its
+    /// own key window, so walk up to the panel rather than measure the sheet
+    /// itself. Falling back to the screen covers the panel not being up yet.
     private static var screenHeight: CGFloat? {
-        NSApp?.keyWindow?.frame.height ?? NSScreen.main?.visibleFrame.height
+        var window = NSApp?.keyWindow
+        while let parent = window?.sheetParent { window = parent }
+        return window?.frame.height ?? NSScreen.main?.visibleFrame.height
     }
     #endif
 }

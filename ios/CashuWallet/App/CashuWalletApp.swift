@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -49,6 +50,10 @@ struct CashuWalletApp: App {
     // owns the window. See MacMenuBarController for why a panel and not a
     // MenuBarExtra.
     @NSApplicationDelegateAdaptor(MacMenuBarAppDelegate.self) private var appDelegate
+    #else
+    @StateObject private var walletManager: WalletManager
+    @StateObject private var navigationManager: NavigationManager
+    @StateObject private var appLockManager: AppLockManager
     #endif
 
     init() {
@@ -56,18 +61,23 @@ struct CashuWalletApp: App {
         // stderr can't turn a Rust log write into a bogus "failed printing to stderr"
         // panic that masks the real error. See AppLogger for the full rationale.
         AppLogger.redirectStandardStreamsIfNeeded()
+        #if os(iOS)
         if IntegrationTestConfig.shouldDisableAnimations {
             UIView.setAnimationsEnabled(false)
         }
+        #endif
         #if DEBUG
         // A fresh UI-test wallet must not inherit App Lock from a previous
         // test. Reset before either settings or the lock manager is created;
         // persistence relaunches omit RESET_WALLET and keep the saved setting.
-        // `App.init` runs before `AppRootView` is built, which is what keeps
-        // that ordering true now that the managers are owned by the root view.
         if IntegrationTestConfig.isEnabled && IntegrationTestConfig.shouldResetWallet {
             SettingsStore.shared.appLockEnabled = false
         }
+        #endif
+        #if os(iOS)
+        _walletManager = StateObject(wrappedValue: WalletManager())
+        _navigationManager = StateObject(wrappedValue: NavigationManager())
+        _appLockManager = StateObject(wrappedValue: AppLockManager.shared)
         #endif
     }
 
@@ -81,44 +91,39 @@ struct CashuWalletApp: App {
         WindowGroup {
             #if DEBUG
             if IntegrationTestConfig.shouldShowComponentCatalog {
-                ComponentCatalogRootView()
+                ComponentCatalogView(
+                    page: .init(rawValue: IntegrationTestConfig.componentCatalogPage)
+                )
+                .environmentObject(walletManager)
             } else {
-                AppRootView()
+                root
             }
             #else
-            AppRootView()
+            root
             #endif
         }
         #endif
     }
-}
 
-#if DEBUG
-/// Stands in for `AppRootView` in catalog mode. It owns its own `WalletManager`
-/// because the managers moved onto the root view; the two modes are mutually
-/// exclusive, so only one is ever constructed.
-private struct ComponentCatalogRootView: View {
-    @StateObject private var walletManager = WalletManager()
-
-    var body: some View {
-        ComponentCatalogView(
-            page: .init(rawValue: IntegrationTestConfig.componentCatalogPage)
+    #if os(iOS)
+    private var root: some View {
+        AppRootView(
+            walletManager: walletManager,
+            navigationManager: navigationManager,
+            appLockManager: appLockManager
         )
-        .environmentObject(walletManager)
     }
+    #endif
 }
-#endif
 
 /// The real app root, shared by the iOS scene and the macOS menu bar panel.
 ///
-/// It owns the app-wide managers because on macOS there is no `WindowGroup` to
-/// hang them off — the panel hosts this view directly, and a single owner is
-/// what keeps the two platforms running the same object graph rather than two
-/// subtly different ones.
+/// The managers are injected rather than owned: on iOS the `App` keeps the one
+/// set every scene shares, and on macOS the panel creates its own.
 struct AppRootView: View {
-    @StateObject private var walletManager = WalletManager()
-    @StateObject private var navigationManager = NavigationManager()
-    @StateObject private var appLockManager = AppLockManager.shared
+    @ObservedObject var walletManager: WalletManager
+    @ObservedObject var navigationManager: NavigationManager
+    @ObservedObject var appLockManager: AppLockManager
 
     #if os(iOS)
     @Environment(\.scenePhase) private var scenePhase
@@ -140,16 +145,11 @@ struct AppRootView: View {
             // above the scene (see AppLockWindow.swift). AppKit has no
             // equivalent here — the wallet is one NSPanel — so the Mac keeps the
             // in-tree overlay. Known gap: a macOS sheet is its own window, so
-            // this does not cover one that is already open.
-
-            // App-switcher privacy cover (no lock yet). Sits above sheets so
-            // backgrounding mid-presentation never leaks content.
+            // neither layer covers one that is already open.
             if appLockManager.isObscured && !appLockManager.isLocked {
                 PrivacyCoverView()
             }
 
-            // Lock gate. Window-level so it covers ContentView's full-screen
-            // covers and MainTabView's sheets too.
             if appLockManager.isLocked {
                 AppLockView()
                     .environmentObject(appLockManager)
@@ -177,7 +177,12 @@ struct AppRootView: View {
                 appLockManager.appResignedActive()
             case .background:
                 appLockManager.appResignedActive()
-                resignedActive()
+                CashuRequestListener.shared.requestStop()
+                // Quiesce the timers so no fresh mint network + wallet-DB write kicks
+                // off during the brief background-transition window before suspension.
+                NPCService.shared.stopBackgroundRefresh()
+                PriceService.shared.stopAutoRefresh()
+                walletManager.stopPendingQuoteForegroundPolling()
             @unknown default:
                 break
             }
@@ -185,21 +190,22 @@ struct AppRootView: View {
         #else
         // macOS has no scene phase here — the panel is an AppKit window, not a
         // SwiftUI scene. MacMenuBarController posts these instead, on panel
-        // open and close, so both platforms run the same two code paths.
+        // open and close.
         .onReceive(NotificationCenter.default.publisher(for: .cashuMenuBarPanelDidOpen)) { _ in
             guard IntegrationTestConfig.shouldRunPaymentServices else { return }
             becameActive()
         }
+        // Closing the panel only starts the lock clock. A menu bar wallet is
+        // never suspended, so the payment listener and polling keep running
+        // rather than mirroring the iOS `.background` teardown.
         .onReceive(NotificationCenter.default.publisher(for: .cashuMenuBarPanelDidClose)) { _ in
             guard IntegrationTestConfig.shouldRunPaymentServices else { return }
             appLockManager.appResignedActive()
-            resignedActive()
         }
         // `onOpenURL` needs a SwiftUI scene to deliver into, and the panel is an
-        // AppKit window. The delegate's URL handler re-posts here instead so
-        // `cashu:` links still route through the one deep-link entry point.
-        .onReceive(NotificationCenter.default.publisher(for: .cashuMenuBarDidReceiveURL)) { note in
-            guard let url = note.object as? URL else { return }
+        // AppKit window, so the delegate hands `cashu:` links over here instead.
+        .onReceive(MacMenuBarAppDelegate.incomingURL.compactMap { $0 }) { url in
+            MacMenuBarAppDelegate.incomingURL.send(nil)
             navigationManager.handleDeepLink(url: url)
         }
         #endif
@@ -235,14 +241,5 @@ struct AppRootView: View {
             PriceService.shared.startAutoRefresh()
         }
         walletManager.startPendingQuoteForegroundPolling()
-    }
-
-    private func resignedActive() {
-        CashuRequestListener.shared.requestStop()
-        // Quiesce the timers so no fresh mint network + wallet-DB write kicks
-        // off during the brief background-transition window before suspension.
-        NPCService.shared.stopBackgroundRefresh()
-        PriceService.shared.stopAutoRefresh()
-        walletManager.stopPendingQuoteForegroundPolling()
     }
 }
