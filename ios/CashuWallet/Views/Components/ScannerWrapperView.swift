@@ -606,6 +606,7 @@ struct CashuPaymentRequestPayView: View {
                 })
                 .environmentObject(walletManager)
                 .canvasSheetBackground()
+                .sheetDetents([.large])
             }
             .onAppear {
                 syncSelectedMint()
