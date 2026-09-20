@@ -706,7 +706,7 @@ struct MainWalletView: View {
                 onComplete: { navigationManager.activeWalletSheet = nil }
             )
             .environmentObject(walletManager)
-            .presentationDetents([.large])
+            .sheetDetents([.large])
             .presentationDragIndicator(.visible)
             .walletSheetSurface(fillsScreen: true)
         case .scanner:
@@ -722,22 +722,22 @@ struct MainWalletView: View {
                 }
             )
             .environmentObject(walletManager)
-            .presentationDetents([.large])
+            .sheetDetents([.large])
             .canvasSheetBackground()
         case .sendEcash:
             // Swapped into the sheet from Send's method row, so there is no
             // stack to pop: X and swipe-down both abandon to the wallet.
             SendView()
                 .environmentObject(walletManager)
-                .presentationDetents([.large])
+                .sheetDetents([.large])
         case .receiveLightning:
             ReceiveLightningView()
                 .environmentObject(walletManager)
-                .presentationDetents([.large])
+                .sheetDetents([.large])
         case .meltInvoice(let invoice):
             MeltViewWithInvoice(invoice: invoice)
                 .environmentObject(walletManager)
-                .presentationDetents([.large])
+                .sheetDetents([.large])
                 .walletSheetSurface(fillsScreen: true)
         case .connectMint:
             // Same surface the Send sheet shows when there are no mints — the

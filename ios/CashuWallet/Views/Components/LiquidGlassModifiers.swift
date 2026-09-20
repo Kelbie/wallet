@@ -716,6 +716,22 @@ private struct ContentFitDetent: ViewModifier {
     }
 
     func body(content: Content) -> some View {
+        #if os(macOS)
+        // No detents to race on macOS: the sheet is a window that simply
+        // takes the measured height.
+        content.macSheetFrame(height: enabled
+            ? ContentFitSheetMetrics.detentHeight(
+                for: contentHeight,
+                estimate: estimate,
+                hasNavigationBar: navigationBar
+            )
+            : MacSheetMetrics.large)
+        #else
+        iOSBody(content: content)
+        #endif
+    }
+
+    private func iOSBody(content: Content) -> some View {
         content
             .presentationDetents(detents, selection: $selection)
             .onAppear { apply(detent) }
@@ -753,6 +769,30 @@ private extension Duration {
     /// `Animation` still speaks in seconds.
     var seconds: Double {
         Double(components.seconds) + Double(components.attoseconds) / 1e18
+    }
+}
+
+/// Platform-neutral spelling of the `PresentationDetent`s the app uses.
+enum SheetDetent: Hashable {
+    case medium, large
+    case height(CGFloat)
+}
+
+extension View {
+    /// `presentationDetents` on iOS, unchanged. macOS ignores detents, so there
+    /// the sheet gets an explicit frame instead (see MacSwiftUICompat.swift).
+    func sheetDetents(_ detents: Set<SheetDetent>) -> some View {
+        #if os(macOS)
+        macSheetFrame(height: MacSheetMetrics.height(for: detents))
+        #else
+        presentationDetents(Set(detents.map { detent -> PresentationDetent in
+            switch detent {
+            case .medium: .medium
+            case .large: .large
+            case .height(let height): .height(height)
+            }
+        }))
+        #endif
     }
 }
 

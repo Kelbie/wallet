@@ -79,6 +79,41 @@ extension View {
     }
 }
 
+// MARK: - Sheet sizing
+//
+// iOS sizes a sheet with detents and lets the content flex inside it. macOS
+// accepts the same modifier but ignores it: a sheet is a window sized to its
+// content's *ideal* size, and these phone layouts (scroll views, spacers,
+// camera previews) have almost none, so every sheet collapsed to a strip. The
+// detents are mapped onto an explicit frame instead, measured against the menu
+// bar panel the sheet hangs from. Shadowing `presentationDetents` itself is
+// not an option — the overload is ambiguous at some call sites — so views go
+// through `sheetDetents(_:)`.
+
+enum MacSheetMetrics {
+    /// Inset from the panel so the sheet reads as attached to it.
+    static let width = MacMenuBarController.panelSize.width - 24
+    static let large = MacMenuBarController.panelSize.height - 40
+    static let medium = (MacMenuBarController.panelSize.height / 2).rounded()
+
+    /// A Mac sheet cannot be dragged between detents, so the tallest wins.
+    static func height(for detents: Set<SheetDetent>) -> CGFloat {
+        detents.map { detent in
+            switch detent {
+            case .medium: medium
+            case .large: large
+            case .height(let height): height
+            }
+        }.max() ?? large
+    }
+}
+
+extension View {
+    func macSheetFrame(height: CGFloat) -> some View {
+        frame(width: MacSheetMetrics.width, height: min(height, MacSheetMetrics.large))
+    }
+}
+
 // MARK: - Full-screen presentation
 
 /// macOS has no full-screen cover. A sheet is the honest equivalent: modal,
@@ -90,7 +125,7 @@ extension View {
         onDismiss: (() -> Void)? = nil,
         @ViewBuilder content: @escaping (Item) -> Content
     ) -> some View {
-        sheet(item: item, onDismiss: onDismiss, content: content)
+        sheet(item: item, onDismiss: onDismiss) { content($0).macSheetFrame(height: MacSheetMetrics.large) }
     }
 
     func fullScreenCover<Content: View>(
@@ -98,7 +133,7 @@ extension View {
         onDismiss: (() -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        sheet(isPresented: isPresented, onDismiss: onDismiss, content: content)
+        sheet(isPresented: isPresented, onDismiss: onDismiss) { content().macSheetFrame(height: MacSheetMetrics.large) }
     }
 }
 

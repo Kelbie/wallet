@@ -596,7 +596,7 @@ struct CashuPaymentRequestPayView: View {
                     }
                 )
                 .environmentObject(walletManager)
-                .presentationDetents([.medium])
+                .sheetDetents([.medium])
             }
             .sheet(item: $topUpContext) { context in
                 CashuTopUpInvoiceSheet(context: context, onComplete: {

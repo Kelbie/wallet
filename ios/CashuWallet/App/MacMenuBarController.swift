@@ -34,7 +34,7 @@ final class MacMenuBarController: NSObject {
     /// Phone-shaped, because the UI inside it is. Tall enough for the wallet
     /// home without scrolling, short enough to fit a laptop screen under the
     /// menu bar.
-    private static let panelSize = NSSize(width: 400, height: 700)
+    static let panelSize = NSSize(width: 400, height: 700)
 
     private var statusItem: NSStatusItem?
     private var panel: MenuBarPanel?

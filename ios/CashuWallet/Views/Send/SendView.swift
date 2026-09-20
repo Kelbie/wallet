@@ -4001,7 +4001,7 @@ struct UnitSelectorSheet: View {
             .navigationTitle("Select Unit")
             .navigationBarTitleDisplayMode(.inline)
         }
-        .presentationDetents([.height(detentHeight)])
+        .sheetDetents([.height(detentHeight)])
         .presentationDragIndicator(.visible)
         .compactBottomSheetSurface()
     }
@@ -4061,7 +4061,7 @@ struct MintSelectorSheet: View {
             .navigationTitle("Choose mint")
             .navigationBarTitleDisplayMode(.inline)
         }
-        .presentationDetents([.height(Self.pickerHeight)])
+        .sheetDetents([.height(Self.pickerHeight)])
         .presentationDragIndicator(.visible)
         .compactBottomSheetSurface()
     }
@@ -4294,7 +4294,7 @@ struct AddMintToPaySheet: View {
             .navigationTitle("Add a mint to pay")
             .navigationBarTitleDisplayMode(.inline)
         }
-        .presentationDetents([.height(detentHeight)])
+        .sheetDetents([.height(detentHeight)])
         .presentationDragIndicator(.visible)
         .compactBottomSheetSurface()
         .onAppear(perform: loadPreviews)
@@ -4423,7 +4423,7 @@ struct MethodPickerSheet: View {
             .navigationTitle("Receive with")
             .navigationBarTitleDisplayMode(.inline)
         }
-        .presentationDetents([.height(detentHeight)])
+        .sheetDetents([.height(detentHeight)])
         .presentationDragIndicator(.visible)
         .compactBottomSheetSurface()
     }
