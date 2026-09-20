@@ -1451,6 +1451,7 @@
 				INFOPLIST_FILE = CashuWallet/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Cashu;
 				INFOPLIST_KEY_NFCReaderUsageDescription = "Hold your iPhone near a payment terminal or NFC tag to send Cashu ecash.";
+				"INFOPLIST_KEY_LSUIElement[sdk=macosx*]" = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used to scan QR codes for receiving ecash tokens and Lightning invoices.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Cashu Wallet uses Face ID to unlock the app and protect your funds.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -1498,6 +1499,7 @@
 				INFOPLIST_FILE = CashuWallet/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Cashu;
 				INFOPLIST_KEY_NFCReaderUsageDescription = "Hold your iPhone near a payment terminal or NFC tag to send Cashu ecash.";
+				"INFOPLIST_KEY_LSUIElement[sdk=macosx*]" = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used to scan QR codes for receiving ecash tokens and Lightning invoices.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Cashu Wallet uses Face ID to unlock the app and protect your funds.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
