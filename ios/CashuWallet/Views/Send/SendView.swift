@@ -186,7 +186,7 @@ struct SendView: View {
         }
         // A stray swipe must not tear down the flow while proofs are being
         // swapped into the locked/pending token.
-        .interactiveDismissDisabled(isGenerating)
+        .sheetDismissDisabled(isGenerating)
         .walletSheetSurface(fillsScreen: true)
     }
 
@@ -1474,7 +1474,7 @@ struct UnifiedSendView: View {
         // dismiss affordance, so no grabber competes with it.
         .presentationDragIndicator(routedPresentation ? .hidden : .visible)
         // A stray swipe must not tear down the flow while the melt is executing.
-        .interactiveDismissDisabled(step == .sending)
+        .sheetDismissDisabled(step == .sending)
         .walletSheetSurface(fillsScreen: !prefersCompactSheet)
     }
 
@@ -3147,7 +3147,7 @@ struct MeltView: View {
         }
         // A stray swipe must not tear down the flow mid-melt (sheet
         // presentations only; covers have no interactive dismiss).
-        .interactiveDismissDisabled(isPaying)
+        .sheetDismissDisabled(isPaying)
         .onDisappear { cancelMeltQuote() }
     }
 

@@ -632,7 +632,7 @@ struct CashuPaymentRequestPayView: View {
         }
         // Preserve native swipe-to-dismiss everywhere except the brief interval
         // where proofs are being reserved or delivered.
-        .interactiveDismissDisabled(isPaying)
+        .sheetDismissDisabled(isPaying)
     }
 
     private var showsMintIdentityHeader: Bool {

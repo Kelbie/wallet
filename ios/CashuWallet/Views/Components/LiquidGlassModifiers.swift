@@ -772,6 +772,19 @@ private extension Duration {
     }
 }
 
+extension View {
+    /// `interactiveDismissDisabled` on iOS, unchanged. On macOS it disables the
+    /// sheet's esc-to-close instead, which is the only interactive dismissal
+    /// a Mac sheet has.
+    func sheetDismissDisabled(_ disabled: Bool) -> some View {
+        #if os(macOS)
+        preference(key: SheetDismissDisabledKey.self, value: disabled)
+        #else
+        interactiveDismissDisabled(disabled)
+        #endif
+    }
+}
+
 /// Platform-neutral spelling of the `PresentationDetent`s the app uses.
 enum SheetDetent: Hashable {
     case medium, large

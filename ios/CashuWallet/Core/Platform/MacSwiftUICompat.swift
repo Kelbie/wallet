@@ -110,7 +110,42 @@ enum MacSheetMetrics {
 
 extension View {
     func macSheetFrame(height: CGFloat) -> some View {
-        frame(width: MacSheetMetrics.width, height: min(height, MacSheetMetrics.large))
+        modifier(MacSheetChrome(height: min(height, MacSheetMetrics.large)))
+    }
+}
+
+/// Set by `sheetDismissDisabled(_:)` from inside a sheet, read by its chrome.
+struct SheetDismissDisabledKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
+    }
+}
+
+/// Sizes a sheet and lets esc close it.
+///
+/// iOS sheets are closed by swiping down; the toolbar close button is the
+/// fallback. macOS has no swipe, and a toolbar inside a sheet window is not
+/// reliably rendered, so without this some sheets could only be escaped by
+/// closing the whole panel. The shortcut is off while the sheet has asked not
+/// to be dismissed — the same in-flight guard that blocks the swipe on iOS.
+private struct MacSheetChrome: ViewModifier {
+    let height: CGFloat
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var dismissDisabled = false
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: MacSheetMetrics.width, height: height)
+            .onPreferenceChange(SheetDismissDisabledKey.self) { dismissDisabled = $0 }
+            .background {
+                Button("Close") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(dismissDisabled)
+                    .opacity(0)
+                    .accessibilityHidden(true)
+            }
     }
 }
 
