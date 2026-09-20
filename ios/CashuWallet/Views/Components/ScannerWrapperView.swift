@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 #if canImport(AppKit)
 import AppKit
+import Vision
 #endif
 import Cdk
 
@@ -1478,9 +1479,9 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
 //
 // Same job, different toolkit: AppKit has no view controller in the SwiftUI
 // representable, so the capture session lives on the coordinator and the view
-// is a thin layer host. Mac webcams feed AVCaptureMetadataOutput exactly as
-// iPhone cameras do, so the scan path itself is unchanged — which is why this
-// is a port rather than a stub.
+// is a thin layer host. `AVCaptureMetadataOutput` offers no machine-readable
+// code types on macOS (only faces, bodies and pets), so QR codes are detected
+// in the video frames with Vision instead.
 
 /// Layer-backed preview surface. Reports window attachment so the coordinator
 /// can start and stop the camera with the sheet rather than leaving it running.
@@ -1544,7 +1545,7 @@ struct LegacyQRScannerView: NSViewRepresentable {
         coordinator.stop()
     }
 
-    final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
+    final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         var onResult: (String) -> Void
         var onFailure: (String) -> Void
         var onAppear: () -> Void
@@ -1554,6 +1555,15 @@ struct LegacyQRScannerView: NSViewRepresentable {
             label: "com.cashu.me.qr-scanner-session",
             qos: .userInitiated
         )
+        private let videoQueue = DispatchQueue(
+            label: "com.cashu.me.qr-scanner-video",
+            qos: .userInitiated
+        )
+        private let barcodeRequest: VNDetectBarcodesRequest = {
+            let request = VNDetectBarcodesRequest()
+            request.symbologies = [.qr]
+            return request
+        }()
         private var isConfigured = false
 
         init(
@@ -1571,12 +1581,16 @@ struct LegacyQRScannerView: NSViewRepresentable {
             guard isConfigured else { return }
             view.attach(session: session)
             view.onWindowChange = { [weak self] hasWindow in
-                if hasWindow {
-                    self?.onAppear()
-                    self?.start()
-                } else {
+                guard hasWindow else {
                     self?.stop()
+                    return
                 }
+                self?.start()
+                // `viewDidMoveToWindow` fires inside AppKit's layout pass, and
+                // `onAppear` mutates SwiftUI state. Doing that synchronously
+                // re-invalidates constraints mid-pass, which AppKit treats as
+                // a fatal layout loop.
+                DispatchQueue.main.async { self?.onAppear() }
             }
         }
 
@@ -1584,7 +1598,7 @@ struct LegacyQRScannerView: NSViewRepresentable {
             guard !isConfigured else { return }
 
             guard let device = AVCaptureDevice.default(for: .video) else {
-                onFailure("No camera is available on this Mac.")
+                fail("No camera is available on this Mac.")
                 return
             }
 
@@ -1592,29 +1606,35 @@ struct LegacyQRScannerView: NSViewRepresentable {
             do {
                 input = try AVCaptureDeviceInput(device: device)
             } catch {
-                onFailure(error.localizedDescription)
+                fail(error.localizedDescription)
                 return
             }
+
+            // Late frames are dropped, so detection runs only as fast as
+            // Vision keeps up and never queues behind the camera.
+            let videoOutput = AVCaptureVideoDataOutput()
+            videoOutput.alwaysDiscardsLateVideoFrames = true
+            videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
 
             session.beginConfiguration()
-            defer { session.commitConfiguration() }
-
-            guard session.canAddInput(input) else {
-                onFailure("Could not add video input.")
+            let canWire = session.canAddInput(input) && session.canAddOutput(videoOutput)
+            if canWire {
+                session.addInput(input)
+                session.addOutput(videoOutput)
+            }
+            session.commitConfiguration()
+            guard canWire else {
+                fail("Could not configure the camera.")
                 return
             }
-            session.addInput(input)
-
-            let metadataOutput = AVCaptureMetadataOutput()
-            guard session.canAddOutput(metadataOutput) else {
-                onFailure("Could not add metadata output.")
-                return
-            }
-            session.addOutput(metadataOutput)
-            metadataOutput.setMetadataObjectsDelegate(self, queue: .main)
-            metadataOutput.metadataObjectTypes = [.qr]
 
             isConfigured = true
+        }
+
+        /// Configuration runs inside `makeNSView`, where mutating SwiftUI state
+        /// is not allowed, so failures are reported on the next turn.
+        private func fail(_ message: String) {
+            DispatchQueue.main.async { [weak self] in self?.onFailure(message) }
         }
 
         func start() {
@@ -1633,16 +1653,15 @@ struct LegacyQRScannerView: NSViewRepresentable {
             }
         }
 
-        func metadataOutput(
-            _ output: AVCaptureMetadataOutput,
-            didOutput metadataObjects: [AVMetadataObject],
+        func captureOutput(
+            _ output: AVCaptureOutput,
+            didOutput sampleBuffer: CMSampleBuffer,
             from connection: AVCaptureConnection
         ) {
-            guard
-                let readable = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
-                let value = readable.stringValue
-            else { return }
-            onResult(value)
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            try? VNImageRequestHandler(cvPixelBuffer: pixelBuffer).perform([barcodeRequest])
+            guard let value = barcodeRequest.results?.first?.payloadStringValue else { return }
+            DispatchQueue.main.async { [weak self] in self?.onResult(value) }
         }
     }
 }
