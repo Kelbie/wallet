@@ -54,6 +54,7 @@ struct CashuWalletApp: App {
     @StateObject private var walletManager: WalletManager
     @StateObject private var navigationManager: NavigationManager
     @StateObject private var appLockManager: AppLockManager
+    @Environment(\.scenePhase) private var scenePhase
     #endif
 
     init() {
@@ -110,7 +111,8 @@ struct CashuWalletApp: App {
         AppRootView(
             walletManager: walletManager,
             navigationManager: navigationManager,
-            appLockManager: appLockManager
+            appLockManager: appLockManager,
+            scenePhase: scenePhase
         )
     }
     #endif
@@ -126,7 +128,10 @@ struct AppRootView: View {
     @ObservedObject var appLockManager: AppLockManager
 
     #if os(iOS)
-    @Environment(\.scenePhase) private var scenePhase
+    /// Read by `App`, not here: a view's own `scenePhase` is per scene, so on a
+    /// multi-window iPad one window backgrounding would stop the services for
+    /// the whole app. The app-level phase is the aggregate of every scene.
+    let scenePhase: ScenePhase
     #endif
 
     var body: some View {

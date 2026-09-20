@@ -151,13 +151,13 @@ struct HistoryView: View {
             .sheet(item: $selectedTransaction) { transaction in
                 TransactionDetailView(transaction: transaction)
                     .environmentObject(walletManager)
-                    .sheetDetents([.large])
+                    .macLargeSheet()
                     .observeBottomSheetDismissal { isSheetDismissing = $0 }
             }
             .sheet(item: $selectedRequest) { request in
                 CashuRequestReceiptView(request: request)
                     .environmentObject(walletManager)
-                    .sheetDetents([.large])
+                    .macLargeSheet()
                     .observeBottomSheetDismissal { isSheetDismissing = $0 }
             }
             .backdropSheet(item: $requestPendingDeletion) { request in

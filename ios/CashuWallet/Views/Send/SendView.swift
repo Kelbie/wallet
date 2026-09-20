@@ -169,7 +169,7 @@ struct SendView: View {
                 )
                 .environmentObject(walletManager)
                 .canvasSheetBackground()
-                .sheetDetents([.large])
+                .macLargeSheet()
             }
             .onDisappear {
                 checkingTask?.cancel()
@@ -1419,7 +1419,7 @@ struct UnifiedSendView: View {
                 ScannerWrapperView(onScanned: handleScannedDestination)
                     .environmentObject(walletManager)
                     .canvasSheetBackground()
-                    .sheetDetents([.large])
+                    .macLargeSheet()
             }
             .sheet(isPresented: $showingMintPicker) { mintPickerSheet }
             .sheet(item: $topUpContext) { context in
@@ -1429,7 +1429,7 @@ struct UnifiedSendView: View {
                 })
                 .environmentObject(walletManager)
                 .flatBottomSheetSurface()
-                .sheetDetents([.large])
+                .macLargeSheet()
             }
             .onChange(of: destination) { handleDestinationChange() }
             .onChange(of: entryUnit) { oldUnit, newUnit in
@@ -3096,7 +3096,7 @@ struct MeltView: View {
                 ScannerWrapperView(onScanned: handleScannedRequest)
                     .environmentObject(walletManager)
                     .canvasSheetBackground()
-                    .sheetDetents([.large])
+                    .macLargeSheet()
             }
             .sheet(isPresented: $showingMintPicker) {
                 MintSelectorSheet(

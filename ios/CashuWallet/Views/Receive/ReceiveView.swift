@@ -64,7 +64,7 @@ struct UnifiedReceiveView: View {
                     ScannerWrapperView(onScanned: handleScanned)
                         .environmentObject(walletManager)
                         .canvasSheetBackground()
-                        .sheetDetents([.large])
+                        .macLargeSheet()
                 }
                 .fullScreenCover(item: $route) { routeView($0).canvasSheetBackground() }
                 .onChange(of: tokenInput) { handleInputChange() }

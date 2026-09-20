@@ -283,12 +283,15 @@ class KeychainService: SecureStorageProtocol {
     /// Falling back keeps `Scripts/build-macos.sh` usable with no Apple Developer
     /// account, at the cost of using the legacy keychain on those builds only.
     ///
-    /// On iOS there is only one keychain, so the flag is inert and the fallback
-    /// is compiled out.
+    /// On iOS there is only one keychain, so the query is passed through
+    /// untouched — byte-for-byte what the app sent before the Mac port.
     private static func runWithPreferredKeychain(
         _ query: [String: Any],
         _ perform: ([String: Any]) -> OSStatus
     ) -> OSStatus {
+        #if os(iOS)
+        return perform(query)
+        #else
         var preferred = query
         preferred[kSecUseDataProtectionKeychain as String] = true
 
@@ -307,9 +310,11 @@ class KeychainService: SecureStorageProtocol {
             )
         }
         return fallback
+        #endif
     }
 
-    /// Which statuses mean "try the legacy keychain instead". macOS only.
+    #if os(macOS)
+    /// Which statuses mean "try the legacy keychain instead".
     ///
     /// `errSecMissingEntitlement` and `errSecNotAvailable` are refusals: this
     /// process may not use the data-protection keychain at all.
@@ -320,12 +325,9 @@ class KeychainService: SecureStorageProtocol {
     /// reports a miss. Trusting that miss splits reads from writes — the seed
     /// saves, reads back as absent, and onboarding appears over a funded wallet.
     private static func shouldFallBackToLegacyKeychain(_ status: OSStatus) -> Bool {
-        #if os(macOS)
         status == errSecMissingEntitlement || status == errSecNotAvailable || status == errSecItemNotFound
-        #else
-        false
-        #endif
     }
+    #endif
 
     private static func copyMatching(_ query: [String: Any], _ result: inout AnyObject?) -> OSStatus {
         var found: AnyObject?

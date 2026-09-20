@@ -156,7 +156,7 @@ struct MainWalletView: View {
             .sheet(item: $selectedTransaction) { transaction in
                 TransactionDetailView(transaction: transaction)
                     .environmentObject(walletManager)
-                    .sheetDetents([.large])
+                    .macLargeSheet()
                     .observeBottomSheetDismissal { isSheetDismissing = $0 }
             }
             .task { await walletManager.loadTransactions() }

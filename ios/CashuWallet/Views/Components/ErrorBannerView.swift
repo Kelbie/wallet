@@ -527,7 +527,7 @@ private final class ConfirmationToastPresenter: ObservableObject {
         }
     }
 
-    private var reduceMotionEnabled: Bool {
+    fileprivate var reduceMotionEnabled: Bool {
         #if os(iOS)
         UIAccessibility.isReduceMotionEnabled
         #else
@@ -611,7 +611,6 @@ private final class ConfirmationToastWindow: UIWindow {
 
 private struct ConfirmationToastOverlay: View {
     @ObservedObject var presenter: ConfirmationToastPresenter
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -622,7 +621,7 @@ private struct ConfirmationToastOverlay: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 8)
                     .transition(
-                        reduceMotion
+                        presenter.reduceMotionEnabled
                             ? .opacity
                             : .asymmetric(
                                 insertion: .move(edge: .top).combined(with: .opacity),

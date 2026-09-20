@@ -785,6 +785,19 @@ extension View {
     }
 }
 
+extension View {
+    /// For a sheet that sets no detents. iOS already presents those full
+    /// height, so this does nothing there; macOS would hug the content and
+    /// skip the esc-to-close chrome, so there it gets the large frame.
+    func macLargeSheet() -> some View {
+        #if os(macOS)
+        macSheetFrame(height: MacSheetMetrics.large)
+        #else
+        self
+        #endif
+    }
+}
+
 /// Platform-neutral spelling of the `PresentationDetent`s the app uses.
 enum SheetDetent: Hashable {
     case medium, large
@@ -879,8 +892,6 @@ enum ContentFitSheetMetrics {
         let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
         return scene?.keyWindow ?? scene?.windows.first
     }
-
-    private static var bottomSafeAreaInset: CGFloat { activeWindow?.safeAreaInsets.bottom ?? 0 }
 
     private static var screenHeight: CGFloat? { activeWindow?.screen.bounds.height }
     #else
